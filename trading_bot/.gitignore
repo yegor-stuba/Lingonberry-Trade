@@ -1,0 +1,19 @@
+venv/
+.env
+__pycache__/
+*.pyc
+
+/venv
+/.env
+*.log
+*.sqlite
+
+# VS Code settings
+.vscode/settings.json
+
+# Environment variables
+.env
+
+# Virtual environment
+venv/
+credentials.py

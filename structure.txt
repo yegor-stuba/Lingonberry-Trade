@@ -1,0 +1,195 @@
+.venvyegor@tourist trading bot 2 % tree -L 3
+.
+├── api_test_results.json
+├── cache
+│   ├── crypto
+│   │   └── BTCUSDT_1h.json
+│   └── forex
+│       └── EURUSD_1h.json
+├── charts
+│   ├── crypto
+│   │   ├── ADAUSDT1.csv
+│   │   ├── ADAUSDT1440.csv
+│   │   ├── ADAUSDT15.csv
+│   │   ├── ADAUSDT240.csv
+│   │   ├── ADAUSDT30.csv
+│   │   ├── ADAUSDT5.csv
+│   │   ├── ADAUSDT60.csv
+│   │   ├── BTCUSDT1.csv
+│   │   ├── BTCUSDT1440.csv
+│   │   ├── BTCUSDT15.csv
+│   │   ├── BTCUSDT240.csv
+│   │   ├── BTCUSDT30.csv
+│   │   ├── BTCUSDT5.csv
+│   │   ├── BTCUSDT60.csv
+│   │   ├── ETHUSDT1.csv
+│   │   ├── ETHUSDT1440.csv
+│   │   ├── ETHUSDT15.csv
+│   │   ├── ETHUSDT240.csv
+│   │   ├── ETHUSDT30.csv
+│   │   ├── ETHUSDT5.csv
+│   │   ├── ETHUSDT60.csv
+│   │   ├── XRPUSDT1.csv
+│   │   ├── XRPUSDT1440.csv
+│   │   ├── XRPUSDT15.csv
+│   │   ├── XRPUSDT240.csv
+│   │   ├── XRPUSDT30.csv
+│   │   ├── XRPUSDT5.csv
+│   │   └── XRPUSDT60.csv
+│   ├── forex
+│   │   ├── EURUSD1.csv
+│   │   ├── EURUSD1440.csv
+│   │   ├── EURUSD15.csv
+│   │   ├── EURUSD240.csv
+│   │   ├── EURUSD30.csv
+│   │   ├── EURUSD5.csv
+│   │   ├── EURUSD60.csv
+│   │   ├── GBPJPY1.csv
+│   │   ├── GBPJPY1440.csv
+│   │   ├── GBPJPY15.csv
+│   │   ├── GBPJPY240.csv
+│   │   ├── GBPJPY30.csv
+│   │   ├── GBPJPY5.csv
+│   │   ├── GBPJPY60.csv
+│   │   ├── GBPUSD1.csv
+│   │   ├── GBPUSD1440.csv
+│   │   ├── GBPUSD15.csv
+│   │   ├── GBPUSD240.csv
+│   │   ├── GBPUSD30.csv
+│   │   ├── GBPUSD5.csv
+│   │   ├── GBPUSD60.csv
+│   │   ├── USDCAD1.csv
+│   │   ├── USDCAD1440.csv
+│   │   ├── USDCAD15.csv
+│   │   ├── USDCAD240.csv
+│   │   ├── USDCAD30.csv
+│   │   ├── USDCAD5.csv
+│   │   ├── USDCAD60.csv
+│   │   ├── USDJPY1.csv
+│   │   ├── USDJPY1440.csv
+│   │   ├── USDJPY15.csv
+│   │   ├── USDJPY240.csv
+│   │   ├── USDJPY30.csv
+│   │   ├── USDJPY5.csv
+│   │   └── USDJPY60.csv
+│   ├── indeces
+│   │   ├── USA30IDXUSD1.csv
+│   │   ├── USA30IDXUSD1440.csv
+│   │   ├── USA30IDXUSD15.csv
+│   │   ├── USA30IDXUSD240.csv
+│   │   ├── USA30IDXUSD30.csv
+│   │   ├── USA30IDXUSD5.csv
+│   │   ├── USA30IDXUSD60.csv
+│   │   ├── USA500IDXUSD1.csv
+│   │   ├── USA500IDXUSD1440.csv
+│   │   ├── USA500IDXUSD15.csv
+│   │   ├── USA500IDXUSD240.csv
+│   │   ├── USA500IDXUSD30.csv
+│   │   ├── USA500IDXUSD5.csv
+│   │   ├── USA500IDXUSD60.csv
+│   │   ├── USATECHIDXUSD1.csv
+│   │   ├── USATECHIDXUSD1440.csv
+│   │   ├── USATECHIDXUSD15.csv
+│   │   ├── USATECHIDXUSD240.csv
+│   │   ├── USATECHIDXUSD30.csv
+│   │   ├── USATECHIDXUSD5.csv
+│   │   └── USATECHIDXUSD60.csv
+│   └── metals
+│       ├── XAUUSD1.csv
+│       ├── XAUUSD1440.csv
+│       ├── XAUUSD15.csv
+│       ├── XAUUSD240.csv
+│       ├── XAUUSD30.csv
+│       ├── XAUUSD5.csv
+│       └── XAUUSD60.csv
+├── fix_bot.py
+├── plan.txt
+├── setup.py
+├── structure.txt
+├── trading_bot
+│   ├── README.md
+│   ├── __pycache__
+│   │   ├── bot.cpython-313.pyc
+│   │   └── main.cpython-313.pyc
+│   ├── analysis
+│   │   ├── __init__.py
+│   │   ├── __pycache__
+│   │   ├── sentiment.py
+│   │   ├── smc.py
+│   │   └── technical.py
+│   ├── backtesting
+│   │   ├── __init__.py
+│   │   ├── backtest.py
+│   │   ├── backtest_visualization.py
+│   │   ├── cli.py
+│   │   ├── data_loader.py
+│   │   ├── engine.py
+│   │   └── performance.py
+│   ├── bot.py
+│   ├── bridges
+│   │   ├── __init__.py
+│   │   ├── __pycache__
+│   │   └── mt5
+│   ├── config
+│   │   ├── __init__.py
+│   │   ├── __pycache__
+│   │   ├── credentials.py
+│   │   └── settings.py
+│   ├── data
+│   │   ├── __init__.py
+│   │   ├── __pycache__
+│   │   ├── crypto_data.py
+│   │   ├── forex_data.py
+│   │   ├── news_data.py
+│   │   ├── provider_factory.py
+│   │   ├── trading_journal.db
+│   │   ├── web_cache
+│   │   └── web_data.py
+│   ├── journal
+│   │   ├── __init__.py
+│   │   ├── __pycache__
+│   │   ├── analytics.py
+│   │   └── trade_journal.py
+│   ├── logs
+│   │   └── trading_bot.log
+│   ├── main.py
+│   ├── requirements.txt
+│   ├── risk
+│   │   ├── __init__.py
+│   │   ├── __pycache__
+│   │   └── management.py
+│   ├── services
+│   │   ├── __pycache__
+│   │   ├── test_suggestion.py
+│   │   └── trade_suggestion.py
+│   ├── tests
+│   │   ├── __pycache__
+│   │   ├── results
+│   │   ├── test_all_providers.py
+│   │   ├── test_alpha_vantage.py
+│   │   ├── test_charts
+│   │   ├── test_eodhd_api.py
+│   │   ├── test_exchange_rate_api.py
+│   │   ├── test_forexcom.py
+│   │   ├── test_fx_api.py
+│   │   ├── test_market_scanner.py
+│   │   ├── test_simple_scraper.py
+│   │   ├── test_trade_suggestion_with_web.py
+│   │   ├── test_tradermade_api.py
+│   │   ├── test_web_data_provider.py
+│   │   ├── test_web_scraper.py
+│   │   └── test_web_scraper_comprehensive.py
+│   └── utils
+│       ├── __init__.py
+│       ├── __pycache__
+│       ├── helpers.py
+│       └── visualization.py
+├── trading_bot.egg-info
+│   ├── PKG-INFO
+│   ├── SOURCES.txt
+│   ├── dependency_links.txt
+│   └── top_level.txt
+└── zmq.txt
+
+37 directories, 155 files
+.venvyegor@tourist trading bot 2 % 
