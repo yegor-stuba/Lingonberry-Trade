@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Trading Bot Dashboard</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/styles.css') }}">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+<body>
+    <div class="app-container">
+        <div class="sidebar">
+            <div class="sidebar-header">
+                <h2>Lingonberry Trade</h2>
+            </div>
+            <nav class="sidebar-nav">
+                <a href="/" class="nav-item active">
+                    <span class="nav-icon">📊</span>
+                    <span class="nav-text">Dashboard</span>
+                </a>
+                <a href="/performance" class="nav-item">
+                    <span class="nav-icon">📈</span>
+                    <span class="nav-text">Performance</span>
+                </a>
+                <a href="/backtesting" class="nav-item">
+                    <span class="nav-icon">🧪</span>
+                    <span class="nav-text">Backtesting</span>
+                </a>
+            </nav>
+        </div>
+        
+        <div class="main-content">
+            <header class="main-header">
+                <h1>Dashboard</h1>
+                <div class="user-info">
+                    <span id="current-date"></span>
+                </div>
+            </header>
+            
+            <div class="dashboard-grid">
+                <div class="card">
+                    <div class="card-header">
+                        <h3>Performance Summary</h3>
+                    </div>
+                    <div class="card-body">
+                        <div class="metrics-grid">
+                            <div class="metric">
+                                <span class="metric-value" id="win-rate">0%</span>
+                                <span class="metric-label">Win Rate</span>
+                            </div>
+                            <div class="metric">
+                                <span class="metric-value" id="profit-factor">0</span>
+                                <span class="metric-label">Profit Factor</span>
+                            </div>
+                            <div class="metric">
+                                <span class="metric-value" id="total-trades">0</span>
+                                <span class="metric-label">Total Trades</span>
+                            </div>
+                            <div class="metric">
+                                <span class="metric-value" id="total-pnl">$0</span>
+                                <span class="metric-label">Total P&L</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="card">
+                    <div class="card-header">
+                        <h3>Equity Curve</h3>
+                    </div>
+                    <div class="card-body">
+                        <canvas id="equity-chart"></canvas>
+                    </div>
+                </div>
+                
+                <div class="card">
+                    <div class="card-header">
+                        <h3>Active Trades</h3>
+                    </div>
+                    <div class="card-body">
+                        <div class="table-container">
+                            <table id="active-trades-table">
+                                <thead>
+                                    <tr>
+                                        <th>Symbol</th>
+                                        <th>Direction</th>
+                                        <th>Entry</th>
+                                        <th>SL</th>
+                                        <th>TP</th>
+                                        <th>Status</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    <!-- Active trades will be loaded here -->
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="card">
+                    <div class="card-header">
+                        <h3>Recent Trades</h3>
+                    </div>
+                    <div class="card-body">
+                        <div class="table-container">
+                            <table id="recent-trades-table">
+                                <thead>
+                                    <tr>
+                                        <th>Symbol</th>
+                                        <th>Direction</th>
+                                        <th>Entry</th>
+                                        <th>Exit</th>
+                                        <th>P&L</th>
+                                        <th>Status</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    <!-- Recent trades will be loaded here -->
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <script src="{{ url_for('static', filename='js/dashboard.js') }}"></script>
+</body>
+</html>

@@ -539,13 +539,15 @@ class CryptoDataProvider:
         Returns:
             list: List of available cryptocurrency pairs
         """
+        logger.info(f"Fetching cryptocurrency pairs from source: {source}")
         pairs = []
         
         if source in ['auto', 'ccxt'] and self.exchange_connected:
-            # Try to get pairs from CCXT
+            logger.debug("Attempting to fetch pairs from CCXT exchange")
             try:
                 if not self.exchange.markets:
                     await self.exchange.load_markets()
+                    logger.debug("Loaded markets from exchange")
                 
                 # Filter for USDT pairs
                 usdt_pairs = [
@@ -553,11 +555,12 @@ class CryptoDataProvider:
                     for symbol in self.exchange.markets.keys() 
                     if '/USDT' in symbol
                 ]
+                logger.debug(f"Found {len(usdt_pairs)} USDT pairs")
                 
                 # Sort by volume if available
                 if hasattr(self.exchange, 'fetch_tickers'):
+                    logger.debug("Fetching tickers to sort by volume")
                     tickers = await self.exchange.fetch_tickers(usdt_pairs)
-                    # Sort by volume
                     sorted_pairs = sorted(
                         [(symbol, ticker['quoteVolume'] if 'quoteVolume' in ticker else 0) 
                          for symbol, ticker in tickers.items()],
@@ -570,32 +573,34 @@ class CryptoDataProvider:
                 
                 # Limit to top 50 pairs
                 pairs = pairs[:50]
+                logger.info(f"Successfully fetched {len(pairs)} pairs from CCXT")
                 
             except Exception as e:
                 logger.error(f"Error getting crypto pairs from CCXT: {e}")
         
         if not pairs and source in ['auto', 'csv']:
-            # Try to get pairs from CSV files
+            logger.debug("Attempting to fetch pairs from CSV files")
             try:
-                # Get all CSV files in the crypto directory
                 csv_files = list(self.charts_dir.glob('*.csv'))
+                logger.debug(f"Found {len(csv_files)} CSV files")
                 
-                # Extract pair names from filenames
                 for file in csv_files:
-                    # Extract the pair name (remove the timeframe suffix)
                     pair = file.stem
-                    # Remove digits from the end (timeframe)
                     pair = ''.join([c for c in pair if not c.isdigit()])
                     if pair not in pairs:
                         pairs.append(pair)
+                logger.info(f"Successfully loaded {len(pairs)} pairs from CSV files")
+                
             except Exception as e:
                 logger.error(f"Error getting crypto pairs from CSV files: {e}")
         
         # If still no pairs, return default list
         if not pairs:
+            logger.warning("No pairs found from sources, using default pairs list")
             pairs = [p.replace('/', '') for p in settings.CRYPTO_PAIRS]
+            logger.info(f"Using {len(pairs)} default pairs")
         
-        return pairs
+        return pairs    
     
     async def get_crypto_timeframes(self, source='auto'):
         """
@@ -616,3 +621,16 @@ class CryptoDataProvider:
             await self.exchange.close()
             logger.info(f"Closed connection to {self.exchange_id} exchange")
 
+    def close_sync(self):
+        """
+        Close connections synchronously (non-async version)
+        """
+        try:
+            # For CCXT, we can use the sync close method if available
+            if hasattr(self.exchange, 'close') and callable(self.exchange.close):
+                # Some exchanges have a sync close method
+                self.exchange.close()
+            
+            logger.info("Closed connection to binance exchange")
+        except Exception as e:
+            logger.warning(f"Error closing crypto provider: {e}")

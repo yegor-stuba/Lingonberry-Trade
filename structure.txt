@@ -1,11 +1,8 @@
-.venvyegor@tourist trading bot 2 % tree -L 3
+(stable_venv) yegor@tourist trading bot 2 % tree -L 3
 .
-├── api_test_results.json
-├── cache
-│   ├── crypto
-│   │   └── BTCUSDT_1h.json
-│   └── forex
-│       └── EURUSD_1h.json
+├── RAED.md
+├── README.md
+├── cdoc.md
 ├── charts
 │   ├── crypto
 │   │   ├── ADAUSDT1.csv
@@ -102,20 +99,101 @@
 │       ├── XAUUSD30.csv
 │       ├── XAUUSD5.csv
 │       └── XAUUSD60.csv
-├── fix_bot.py
+├── csample.txt
+├── data
+│   ├── BTCUSD_H1.csv
+│   ├── BTCUSD_M1.csv
+│   ├── BTCUSD_M5.csv
+│   ├── BTCUSD_M5_live.csv
+│   ├── EURUSD_H1.csv
+│   ├── EURUSD_H4.csv
+│   ├── EURUSD_M15.csv
+│   ├── EURUSD_M30.csv
+│   ├── EURUSD_M5.csv
+│   ├── GBPJPY_M15.csv
+│   ├── GBPJPY_M30.csv
+│   ├── NAS100_H1.csv
+│   ├── USDJPY_M30.csv
+│   ├── XAUUSD_H1.csv
+│   └── XAUUSD_M15.csv
+├── descr.txt
+├── journal
+│   └── trade_journal.json
 ├── plan.txt
+├── qc.txt
+├── scripts
+│   └── fetch_data.py
 ├── setup.py
+├── stable_venv
+│   ├── bin
+│   │   ├── Activate.ps1
+│   │   ├── __pycache__
+│   │   ├── activate
+│   │   ├── activate.csh
+│   │   ├── activate.fish
+│   │   ├── automat-visualize
+│   │   ├── black
+│   │   ├── blackd
+│   │   ├── cftp
+│   │   ├── ckeygen
+│   │   ├── conch
+│   │   ├── dotenv
+│   │   ├── f2py
+│   │   ├── flask
+│   │   ├── fonttools
+│   │   ├── httpx
+│   │   ├── huggingface-cli
+│   │   ├── isympy
+│   │   ├── mailmail
+│   │   ├── normalizer
+│   │   ├── numpy-config
+│   │   ├── pip
+│   │   ├── pip3
+│   │   ├── pip3.10
+│   │   ├── pwiz.py
+│   │   ├── py.test
+│   │   ├── pyftmerge
+│   │   ├── pyftsubset
+│   │   ├── pyhtmlizer
+│   │   ├── pytest
+│   │   ├── python -> python3.10
+│   │   ├── python3 -> python3.10
+│   │   ├── python3.10 -> /opt/homebrew/opt/python@3.10/bin/python3.10
+│   │   ├── sample
+│   │   ├── tkconch
+│   │   ├── torchfrtrace
+│   │   ├── torchrun
+│   │   ├── tqdm
+│   │   ├── transformers-cli
+│   │   ├── trial
+│   │   ├── ttx
+│   │   ├── twist
+│   │   ├── twistd
+│   │   └── wsdump
+│   ├── include
+│   ├── lib
+│   │   └── python3.10
+│   ├── pyvenv.cfg
+│   └── share
+│       └── man
 ├── structure.txt
+├── tests
+│   ├── test_ctrader.py
+│   ├── test_ctrader_data_enhanced.py
+│   ├── test_data_processor.py
+│   ├── test_ict_strategy.py
+│   ├── test_smc_strategy.py
+│   └── test_trade_suggestion.py
 ├── trading_bot
-│   ├── README.md
+│   ├── __init__.py
 │   ├── __pycache__
-│   │   ├── bot.cpython-313.pyc
-│   │   └── main.cpython-313.pyc
+│   │   └── __init__.cpython-310.pyc
 │   ├── analysis
 │   │   ├── __init__.py
 │   │   ├── __pycache__
+│   │   ├── ict_analyzer.py
 │   │   ├── sentiment.py
-│   │   ├── smc.py
+│   │   ├── smc_analyzer.py
 │   │   └── technical.py
 │   ├── backtesting
 │   │   ├── __init__.py
@@ -125,11 +203,6 @@
 │   │   ├── data_loader.py
 │   │   ├── engine.py
 │   │   └── performance.py
-│   ├── bot.py
-│   ├── bridges
-│   │   ├── __init__.py
-│   │   ├── __pycache__
-│   │   └── mt5
 │   ├── config
 │   │   ├── __init__.py
 │   │   ├── __pycache__
@@ -139,16 +212,12 @@
 │   │   ├── __init__.py
 │   │   ├── __pycache__
 │   │   ├── crypto_data.py
-│   │   ├── forex_data.py
-│   │   ├── news_data.py
-│   │   ├── provider_factory.py
-│   │   ├── trading_journal.db
-│   │   ├── web_cache
-│   │   └── web_data.py
+│   │   ├── ctrader_data.py
+│   │   └── data_processor.py
 │   ├── journal
 │   │   ├── __init__.py
 │   │   ├── __pycache__
-│   │   ├── analytics.py
+│   │   ├── performance_metrics.py
 │   │   └── trade_journal.py
 │   ├── logs
 │   │   └── trading_bot.log
@@ -156,29 +225,18 @@
 │   ├── requirements.txt
 │   ├── risk
 │   │   ├── __init__.py
-│   │   ├── __pycache__
 │   │   └── management.py
-│   ├── services
+│   ├── strategy
 │   │   ├── __pycache__
-│   │   ├── test_suggestion.py
-│   │   └── trade_suggestion.py
-│   ├── tests
+│   │   ├── ict_strategy.py
+│   │   ├── signal_generator.py
+│   │   ├── smc_strategy.py
+│   │   └── strategy_base.py
+│   ├── ui
+│   │   ├── __init__.py
 │   │   ├── __pycache__
-│   │   ├── results
-│   │   ├── test_all_providers.py
-│   │   ├── test_alpha_vantage.py
-│   │   ├── test_charts
-│   │   ├── test_eodhd_api.py
-│   │   ├── test_exchange_rate_api.py
-│   │   ├── test_forexcom.py
-│   │   ├── test_fx_api.py
-│   │   ├── test_market_scanner.py
-│   │   ├── test_simple_scraper.py
-│   │   ├── test_trade_suggestion_with_web.py
-│   │   ├── test_tradermade_api.py
-│   │   ├── test_web_data_provider.py
-│   │   ├── test_web_scraper.py
-│   │   └── test_web_scraper_comprehensive.py
+│   │   ├── telegram_bot.py
+│   │   └── web_dashboard
 │   └── utils
 │       ├── __init__.py
 │       ├── __pycache__
@@ -188,8 +246,11 @@
 │   ├── PKG-INFO
 │   ├── SOURCES.txt
 │   ├── dependency_links.txt
+│   ├── requires.txt
 │   └── top_level.txt
-└── zmq.txt
+├── trading_bot.log
+├── updated_symbol_ids.py
+└── what_we_did.py
 
-37 directories, 155 files
-.venvyegor@tourist trading bot 2 % 
+39 directories, 213 files
+(stable_venv) yegor@tourist trading bot 2 % 

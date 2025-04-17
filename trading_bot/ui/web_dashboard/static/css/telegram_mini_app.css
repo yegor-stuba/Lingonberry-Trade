@@ -1,0 +1,202 @@
+/* Telegram Mini App Styles */
+
+:root {
+    --tg-theme-bg-color: #ffffff;
+    --tg-theme-text-color: #000000;
+    --tg-theme-hint-color: #999999;
+    --tg-theme-link-color: #2481cc;
+    --tg-theme-button-color: #2481cc;
+    --tg-theme-button-text-color: #ffffff;
+    --tg-theme-secondary-bg-color: #f0f0f0;
+    
+    --success-color: #28a745;
+    --danger-color: #dc3545;
+    --warning-color: #ffc107;
+    --info-color: #17a2b8;
+}
+
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+    background-color: var(--tg-theme-bg-color);
+    color: var(--tg-theme-text-color);
+    line-height: 1.5;
+    padding: 10px;
+    max-width: 100%;
+    overflow-x: hidden;
+}
+
+/* App Container */
+.tg-app-container {
+    width: 100%;
+    max-width: 600px;
+    margin: 0 auto;
+}
+
+/* Tabs */
+.tg-tabs {
+    display: flex;
+    background-color: var(--tg-theme-secondary-bg-color);
+    border-radius: 8px;
+    margin-bottom: 15px;
+    overflow: hidden;
+}
+
+.tg-tab {
+    flex: 1;
+    text-align: center;
+    padding: 12px;
+    cursor: pointer;
+    transition: all 0.3s ease;
+}
+
+.tg-tab.active {
+    background-color: var(--tg-theme-button-color);
+    color: var(--tg-theme-button-text-color);
+}
+
+/* Tab Content */
+.tg-tab-content {
+    display: none;
+}
+
+.tg-tab-content.active {
+    display: block;
+}
+
+/* Cards */
+.tg-card {
+    background-color: var(--tg-theme-bg-color);
+    border-radius: 8px;
+    box-shadow: 0 1px 5px rgba(0, 0, 0, 0.1);
+    margin-bottom: 15px;
+    overflow: hidden;
+}
+
+.tg-card-header {
+    padding: 12px 15px;
+    border-bottom: 1px solid var(--tg-theme-secondary-bg-color);
+}
+
+.tg-card-header h3 {
+    font-size: 1.1em;
+    font-weight: 600;
+}
+
+.tg-card-body {
+    padding: 15px;
+}
+
+/* Metrics */
+.tg-metrics-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 10px;
+    margin-bottom: 15px;
+}
+
+.tg-metric {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
+    padding: 10px;
+    border-radius: 8px;
+    background-color: var(--tg-theme-secondary-bg-color);
+}
+
+.tg-metric-value {
+    font-size: 1.4em;
+    font-weight: bold;
+    margin-bottom: 3px;
+}
+
+.tg-metric-label {
+    color: var(--tg-theme-hint-color);
+    font-size: 0.8em;
+}
+
+/* Chart Container */
+.tg-chart-container {
+    height: 200px;
+    margin-top: 15px;
+}
+
+/* Tables */
+.tg-table-container {
+    overflow-x: auto;
+}
+
+table {
+    width: 100%;
+    border-collapse: collapse;
+}
+
+th, td {
+    padding: 10px;
+    text-align: left;
+    border-bottom: 1px solid var(--tg-theme-secondary-bg-color);
+}
+
+th {
+    font-weight: 600;
+    color: var(--tg-theme-hint-color);
+}
+
+/* Forms */
+.tg-form-group {
+    margin-bottom: 15px;
+}
+
+label {
+    display: block;
+    margin-bottom: 5px;
+    font-weight: 500;
+}
+
+input, select {
+    width: 100%;
+    padding: 10px;
+    border: 1px solid var(--tg-theme-secondary-bg-color);
+    border-radius: 6px;
+    font-size: 1em;
+    background-color: var(--tg-theme-bg-color);
+    color: var(--tg-theme-text-color);
+}
+
+.tg-btn {
+    width: 100%;
+    padding: 12px;
+    border: none;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 1em;
+    transition: all 0.3s ease;
+}
+
+.tg-btn-primary {
+    background-color: var(--tg-theme-button-color);
+    color: var(--tg-theme-button-text-color);
+}
+
+/* Status Colors */
+.status-pending {
+    color: var(--warning-color);
+}
+
+.status-active {
+    color: var(--info-color);
+}
+
+.status-closed {
+    color: var(--success-color);
+}
+
+.status-cancelled {
+    color: var(--tg-theme-hint-color);
+}

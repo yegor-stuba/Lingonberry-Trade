@@ -1,44 +1,24 @@
-Core Functionality Outline
-Based on your requirements, here's how the bot will function:
+## goal now, it to implement the data fetching, some analytics, test them, simlpe ui, then launch the bot and test it there. ##
 
-Initial Setup:
-
-When a user starts the bot, it will guide them through a setup process
-Collect trading preferences (style, markets, pairs)
-Collect account size and risk parameters
-Store this information for future use
-Market Analysis:
-
-Continuously monitor selected markets for trading opportunities
-Implement SMC and ICT methodologies for analysis
-Generate trade suggestions when good opportunities are found
-Trade Suggestion:
-
-Present trade suggestions with detailed analysis
-Include entry price, stop loss, take profit, risk-reward ratio
-Provide reasoning based on SMC/ICT principles
-Include chart visualization
-Ask for confirmation (yes/no)
-Trade Journaling:
-
-Record trade details when accepted
-Update trade status at end of day (00:00 GMT+1)
-Calculate performance metrics
-Generate statistics and visualizations
-Backtesting:
-
-Allow testing of strategies on historical data
-Generate performance reports
 Implementation Plan
-Let's start with implementing the core components:
+First Phase:
+Complete the SMC Analyzer implementation
+Implement the ICT Strategy
+Create the Signal Generator
 
-First, let's set up the configuration and basic bot structure
-Then implement data fetching from CCXT and MetaTrader5
-Implement the SMC/ICT analysis logic
-Create the trade suggestion and journaling functionality
-Finally, add the backtesting capabilities
+Second Phase:
+Implement the Trade Journal
+Create the Telegram Bot interface
+Implement continuous monitoring
+
+Third Phase:
+Develop the backtesting framework
+Create the web dashboard
+Optimize strategies
 
 
+##########################################################
+this is great, thank you. could you please check plan.txt and structure.txt 
+suggest what to do next as per goal?
 
-// future implementation
-create a custom page for journal, analysis, and backtesting
+let me know if you need anything from my side.

@@ -1,0 +1,43 @@
+chat:
+> Lingonberry Trading Bot:
+Available commands:
+
+/start - Start the bot
+/help - Show this help message
+/analyze - Analyze a trading pair
+/pairs - Show available trading pairs
+/timeframes - Show available timeframes
+/chart - View interactive TradingView chart
+
+/journal - View trading journal
+
+Examples:
+/analyze BTCUSDT H1
+/analyze EURUSD H4
+/chart XAUUSD
+
+> Yegor:
+/analyze
+
+
+Modify Trade Setup
+
+Symbol: EURUSD
+Direction: SHORT
+Entry: 1.13742
+Stop Loss: 1.14320184
+Take Profit: 1.1200744800000006
+Risk/Reward: 3.00
+
+What would you like to modify?
+
+Change Entry
+
+Change Stop Loss
+
+Change Take Profit
+
+Cancel
+
+
+terminal:

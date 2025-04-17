@@ -10,10 +10,14 @@ from pathlib import Path
 BASE_DIR = Path(__file__).resolve().parent.parent
 DATA_DIR = BASE_DIR / "data"
 LOG_DIR = BASE_DIR / "logs"
+CHARTS_DIR = Path(BASE_DIR).parent / "charts"
 
 # Create directories if they don't exist
 os.makedirs(DATA_DIR, exist_ok=True)
 os.makedirs(LOG_DIR, exist_ok=True)
+os.makedirs(CHARTS_DIR, exist_ok=True)
+os.makedirs(CHARTS_DIR / "crypto", exist_ok=True)
+os.makedirs(CHARTS_DIR / "forex", exist_ok=True)
 
 # Database settings
 DB_PATH = BASE_DIR / "data" / "trading_bot.db"
@@ -22,12 +26,22 @@ DB_PATH = BASE_DIR / "data" / "trading_bot.db"
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN", "")
 ADMIN_USER_ID = int(os.environ.get("ADMIN_USER_ID", "0"))
 
+# Web dashboard settings
+# Default to localhost, but allow override via environment variable
+DASHBOARD_URL = os.environ.get("DASHBOARD_URL", "http://localhost:5000")
+DASHBOARD_SECRET_KEY = os.environ.get("DASHBOARD_SECRET_KEY", "your-secret-key-for-flask")
+DASHBOARD_ENABLED = os.environ.get("DASHBOARD_ENABLED", "True").lower() in ("true", "1", "t", "yes")
+
 # Trading preferences
 TRADING_STYLES = ["Intraday", "Intraweek", "Position"]
 MARKETS = ["Forex", "Crypto", "Metals", "Indices"]
 DEFAULT_RISK_PERCENTAGE = 1.0  
 MIN_RISK_REWARD_RATIO = 2.0
 DEFAULT_ACCOUNT_SIZE = 10000.0
+
+# Data settings
+USE_LIVE_DATA = True  # Set to False to use only CSV data
+DATA_CACHE_TIMEOUT = 3600  # Cache timeout in seconds (1 hour)
 
 # Timeframes
 TIMEFRAMES = {
@@ -63,9 +77,6 @@ JOURNAL_FIELDS = [
     "date_time", "symbol", "direction", "entry_price", "stop_loss", "take_profit", 
     "risk_reward", "potential_gain", "outcome", "entry_reason", "market_conditions"
 ]
-
-# Database settings
-DB_PATH = "trading_bot/data/trading_journal.db"
 
 # Visualization settings
 CHART_STYLE = "dark_background"
@@ -126,9 +137,16 @@ MAX_DRAWDOWN_PERCENTAGE = 10.0  # Maximum drawdown percentage before reducing ri
 # Backtesting settings
 BACKTEST_DEFAULT_PERIOD = "1y"  # Default period for backtesting (1 year)
 BACKTEST_COMMISSION = 0.1  # Default commission percentage
+BACKTEST_START_DATE = "2023-01-01"
+BACKTEST_END_DATE = "2023-12-31"
 
 # Web scraper settings
 WEB_SCRAPER_CACHE_DURATION = 300  # 5 minutes
 WEB_SCRAPER_REQUEST_INTERVAL = 2  # 2 seconds between requests to the same site
 PROXIES = []  # List of proxy servers to use
 GENERATE_SYNTHETIC_DATA = True  # Generate synthetic data when web scraping fails
+
+# Data processor settings
+DEFAULT_DATA_SOURCE = "auto"  # Options: "auto", "ctrader", "crypto", "csv"
+DATA_RETRY_COUNT = 3  # Number of retries for data fetching
+DATA_RETRY_DELAY = 2  # Delay between retries in seconds

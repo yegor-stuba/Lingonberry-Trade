@@ -110,7 +110,7 @@ def get_market_type(symbol):
         return "crypto"
     
     # Indices typically start with a country code
-    if symbol in ["US30", "US500", "USTEC", "UK100", "GER40", "JPN225"]:
+    if symbol in ["US30", "US500", "NAS100", "UK100", "GER40", "JPN225"]:
         return "indices"
     
     # Metals typically start with X

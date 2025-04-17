@@ -1,0 +1,948 @@
+Proxies/Endpoints¶
+The cTrader Open API exposes access to several proxies located in different regions so that you can minimize latency and ensure that your service functions as smoothly as possible.
+
+Fortunately, you do not have to choose the most suitable proxy manually. By leveraging the power of the AWS Global Accelerator, our Open API allows for connecting to just one endpoint; afterward, your client will be redirected to the closes proxy we have available.
+
+Connecting to Endpoints¶
+The following endpoints are exposed for connecting to our Open API proxies.
+
+Live	Demo
+live.ctraderapi.com:5035 (for operating with Protobufs)	demo.ctraderapi.com:5035 (for operating with Protobufs)
+live.ctraderapi.com:5036 (for operating with JSON)	demo.ctraderapi.com:5036 (for operating with JSON)
+Protobuf vs JSON
+
+Note that operating with Protobuf always requires a connection to port 5035 (and only this port). Operating with JSON always requires a connection with port 5036 (and only this port).
+
+Live and Demo Environments
+
+Note that demo and live environments are fully separated. If you connect to a live endpoint, you cannot use demo accounts in your application, and vice versa. If your application needs to operate on behalf of demo and live accounts simultaneously you would need to establish and maintain two separate connections.
+
+TCP vs. WebSocket
+
+The endpoints are the same for TCP and WebSocket connections. Note that ports 5035 and 5036 both support TCP and WebSocket connections.
+
+The process of connecting to the endpoints is covered in our 'Establishing a Connection' tutorial.
+
+April 11, 2025
+Copyright © 2025 Spotware Systems Ltd. cTrader, cAlgo, cBroker, cMirror. All rights reserved.
+
+
+
+Establishing a Connection¶
+You can connect to a cTrader Open API proxy using either the TCP protocol or the WebSocket protocol. This guide covers both of these options.
+
+Using TCP¶
+SSL Usage
+
+The TCP client connection must use SSL, otherwise you will not be able to connect or interact with the API.
+
+You can establish a connection as follows using the official cTrader Open API SDKs.
+
+
+C#
+Python
+The Python Open API client automatically attempts to establish a connection when it is initialized.
+
+client = Client("live1.p.ctrader.com", 5035, TcpProtocol)
+
+Via WebSocket¶
+When connecting via the WebSocket protocol the host and port are the same as when connecting via the TCP protocol.
+
+Here is how the official cTrader Open API SDKs establish a connection via WebSocket.
+
+
+C#
+Python
+The Python SDK does not support the WebSocket standard.
+
+
+For an example of a .NET Blazor web app that uses the WebSocket standard to establish and maintain a connection, click here.
+
+Best Practices¶
+Here are some guidelines that you should keep in mind when connecting to the cTrader Open API.
+
+At most, you should create two connections - one for demo accounts and one for live accounts. Each connection can support an unlimited number of accounts of a certain type.
+After a connection is established, you should pass the app authorization flow. If you send any messages before your application is authorized, you will receive an error.
+To keep a connection alive, keep sending a heartbeat event (ProtoHeartbeatEvent) every 10 seconds.
+Use a message queue for sending/receiving data to avoid concurrent send/receive events.
+April 11, 2025
+
+
+
+
+App and Account Authentication¶
+The cTrader Open API authentication process is based on the OAuth 2.0 standard.
+
+This framework allows third-party applications to attain limited access to a service either on behalf of the resource owner, by orchestrating an approval interaction between the resources owner and the service, or by allowing a third-party application to attain access on its own behalf.
+
+Authentication Flow¶
+As per the OAuth 2.0 standard, account authentication requires both an authorization code and an access token.
+
+Defining Tokens
+
+An authorization code is a short-term token that is issued for an individual cTID. Its expiration time is one minute. An access token is a long-term token that allows an application to send and receive messages to and from the cTrader backend. After receiving it, an authorization code must be quickly exchanged with an access token; afterward, all messages sent to the cTrader backend have to be signed with the received access token to authenticate your application. The expiration time of an access token is 2,628,000 seconds (approximately 30 days). After it is expired, a new access token can be generated using a refresh token. The refresh token does not have an expiration time.
+
+Typically, the process of someone new starting to use your application for the first time looks as follows.
+
+1. A user with a certain cTID accesses your application wherever it is deployed; the user interacts with an action button or equivalent.
+
+2. The application uses an embedded browser (or any other suitable means) to redirect the user to a specific URI where they will give the app the necessary permissions.
+
+Gaining Trust
+
+Before redirecting the user to this URI, make sure that the user trusts your app and is aware of the fact that they will need to provide additional permissions.
+
+3. The user is transferred to a predefined redirect URL. This URL contains the access token as the value of the code query parameter.
+
+4. The user is transferred back to the app either of their own accord or automatically. The app is informed of the value of the code parameter.
+
+5. The app sends a request for exchanging the authorization code with an access token to a specific endpoint.
+
+6. The app receives a response containing the access token as the value of the "accessToken" key.
+
+7. The app sends the ProtoOAApplicationAuthReq message containing the clientId and clientSecret fields.
+
+8. The app sends the ProtoOAGetAccountListByAccessTokenReq message containing the accessToken field. The response (ProtoOAGetAccountListByAccessTokenRes) contains the repeated ctidTraderAccountId field.
+
+9. After receiving a response, the app sends the ProtoOAAccountAuthReq message containing the ctidTraderAccountId and accessToken fields.
+
+Afterward, the user should be authenticated under the account the ctidTraderAccountId of which matches the ctidTraderAccountId provided during Step 8.
+
+The below diagram explains how the basic authentication flow works from the perspective of your Open API application.
+
+Redirect the user to a specific URI
+
+Receive the authorization code
+
+Send a request for attaining an access code
+
+Send the ProOAApplicationAuthReq message
+
+Send the ProtoOAAccountAuthReq message
+
+In the sub-sections below, we explain the key steps of the authentication flow in detail.
+
+Adding a Redirect URI¶
+As shown previously, your app needs to attain an authorization code after a user is sent to a certain redirect URI. This URI will include the authorization code as the value of the code query parameter.
+
+To add a new redirect URI, do the following.
+
+1. Open the 'Applications' page in the Open API portal.
+
+2. Click on the 'Edit' button in the row with the application to which you would like to add a redirect URL.
+
+3. In the newly appeared screen, scroll down to the 'Redirect URIs' section.
+
+
+
+4. Add a redirect URL in an available empty text input field. In case no available fields are shown, click on the 'Add Redirect URI' button.
+
+5. Click on the 'Save' button at the bottom of the page to apply your changes.
+
+Managing Redirect URIs
+
+The very first redirect URI is for the playground service that allows you to test your application before giving regular users access to it. Note that it must never be used for a production application. You can add an unlimited number of redirect URIs if required.
+
+Attaining the Authorization Code¶
+To receive an authorization code for a specific cTID, your app will need to send a user to the following URI.
+
+https://id.ctrader.com/my/settings/openapi/grantingaccess/?client_id={clientId}&redirect_uri={your_redirectURI}&scope={scope}&product=web
+Note
+
+At this stage, the user will need to permit your application/service to access their trading accounts. As a result, it is imperative you provide the user with full understanding of what using your application/service will entail in terms of permissions and data storage/processing.
+
+This URI has the following query parameters.
+
+Parameter	Required?	Definition
+client_id	Yes	The unique identifier of your Open API application.
+redirect_uri	Yes	A valid redirect URI specified in the settings of your application.
+scope	Yes	The scope of the permissions that you would like to be given to your application. The following values are accepted.
+accounts. 'View only' access is given. Your application will be able to access account information and statistics; performing trading operations will be impossible.
+trading. Full access is given to account information and statistics as well as all permitted trading operations.
+product	No	If this parameter is specified and set to web, the authorization screen lacks the header and footer, which makes it look better on mobile devices. While the parameter is optional, we recommend setting it to web.
+To view your client_id, go to the 'Applications' page and click on the 'View' button in the 'Credentials' column.
+
+After a user is sent to the URI above (and as long as both parameters are valid), they should see a login/signup screen prompting them to authorize under their cTID. Following that, a user will be shown a dialog where they will be able to permit the application to gain access to one or more accounts linked to their cTID.
+
+When the user clicks on the 'Allow Access' button, they will be redirected to the redirect_uri you had specified originally. As shown in the below example, the authorization code will be added to this URI as a query parameter.
+
+https://my-redirect-uri.com/?code=123ASDASffdg_as234_GCllkoq14adRB7_tvN
+
+At this point, your application would need to access and store the value of the code parameter. It must be quickly exchanged with an access token before the authorization code expires.
+
+Additional Accounts
+
+If a user creates additional accounts after completing the actions described above, these accounts will not be authorized inside the application. Instead, the user would need to be redirected back to the URL provided above so that they could give the application access to any additional accounts that they have created since last login.
+
+Authentication via Google
+
+If the above URI is opened via WebView and the user chooses Google to sign in, Google will display an 'Access Blocked' page, preventing the user from proceeding further.
+
+To prevent this, make sure that the user-agent signature of the device opening the page looks as follows.
+
+'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+
+Attaining an Access Token¶
+To get an access token, perform the following REST API call.
+
+Relative URL
+
+The request URL is relative to https://openapi.ctrader.com.
+
+Method	URL
+GET	apps/token
+This request has the below query parameters.
+
+Parameter	Required?	Definition
+grant_type	Yes	The type of the token send to this endpoint. The following values are accepted.
+authorization_code. An authorization code is sent to the endpoint to exchange it with an access token.
+refresh_token. A refresh token is sent to the endpoint to refresh an existing access token.
+code	No	The token sent to the endpoint. This parameter is mandatory if grant_type=authorization_code.
+redirect_uri	No	A valid redirect URI specified in the settings of your application. This parameter is mandatory if grant_type=authorization_code.
+client_id	Yes	The unique identifier of your Open API application.
+client_secret	Yes	The secret key assigned to your Open API application.
+The request example can be found below.
+
+curl -X GET 'https://openapi.ctrader.com/apps/token?grant_type=authorization_code&code=0ssdgds98as9_QSF56FVC_22dfdf&redirect_uri=https://spotware.com&client_id=5430012&client_secret=012sds23dlkjQsd' -H 'Accept: application/json' -H 'Content-Type: application/json'
+To view your client_secret, return to the 'Applications' page and press the 'View' button in the 'Credentials' column.
+
+Upon a successful request, you should receive a response with the following keys.
+
+Key	Value Type	Definition
+"accessToken"	string	The access token that your application will use to authenticate the messages sent to the cTrader Open API.
+"tokenType"	string	The type of the access token ("bearer" should be the value of this key as the REST standard is used to make the request).
+"expiresIn"	integer	The number of seconds that must pass before the access token expires (by default, the value of this key equals 2628000).
+"refreshToken"	string	The refresh token that must be used for renewing the access token once it expires. The refresh token has no expiry time itself.
+"errorCode"	string/null	The error code that describes why a request was unsuccessful. For a successfull request, the value of this key should be null.
+"description"	string/null	The descroption of an error that has occured during an unsuccessful request. For a successful request, the value of this key should be null.
+For an example of a successful response, see the below snippet.
+
+{
+    "accessToken":"mos8Bw3D4EG0fRPd4Eqq0JxaFT4zjd8e4YijNezh_ag",
+    "tokenType":"bearer",
+    "expiresIn":2628000,
+    "refreshToken":"VCuafFhy81AFZjsWkbuEzdOhhRj5YTWz8fWUwHam7KM",
+    "errorCode":null,
+    "description":null,
+}
+Sending the Required ProtoBuf Messages¶
+After receiving a valid access code, your application will need to send the ProtoOAApplicationAuthReq, ProtoOAGetAccountListByAccessTokenReq, and ProtoOAAccountAuthReq messages. This can be done as follows.
+
+
+C#
+Python
+private static RepeatedField<ProtoOACtidTraderAccount> _ctidTraderAccounts;
+
+List<IDisposable> _disposables = new();
+_disposables.Add(_client.OfType<ProtoOAGetAccountListByAccessTokenRes>().Subscribe(OnAccountIdReceived));
+
+private static void OnAccountIdReceived(ProtoOAGetAccountListByAccessTokenRes response)
+{
+
+    Console.WriteLine($"\nMessage Received:\n{response}");
+
+    _ctidTraderAccounts = response.CtidTraderAccount;
+
+    var accountAuthReq = new ProtoOAAccountAuthReq
+    {
+        CtidTraderAccountId = (long)_ctidTraderAccounts[0].CtidTraderAccountId,
+        AccessToken = _token.AccessToken,
+    };
+
+    _client.SendMessage(accountAuthReq);
+
+}
+
+var _client = new OpenClient(host, ApiInfo.Port, TimeSpan.FromSeconds(10), useWebSocket: false);
+var applicationAuthReq = new ProtoOAApplicationAuthReq
+{
+    ClientId = {your_client_id}, // Add your client ID here
+    ClientSecret = {your_app_secret}, // Add your app secret here
+};
+await _client.SendMessage(applicationAuthReq);
+await Task.Delay(5000);
+var getAccountListByAccessToken = new ProtoOAGetAccountListByAccessTokenReq 
+{
+    AccessToken = {access_token} // Add your access token here
+}
+var accountAuthReq = new ProtoOAAccountAuthReq 
+{
+    ctidTraderAccountId = {account_id}, // Add the ctidTraderAccountId of the account you want to authorize here
+    AccessToken = {access_token} // Add your access token here
+};
+await _client.SendMessage(accountAuthReq);
+
+Refreshing the Access Token¶
+After an access token expires, you will have to renew it using the refreshToken you have gotten earlier. You can perform this action via two different ways.
+
+Sending an HTTP Request¶
+To attain a new access token (and, subsequently, a new refresh token), you can perform the same HTTP request covered above. As shown in the below example, you would have to set the grant_type query parameter to refresh_token.
+
+curl -X POST 'https://openapi.ctrader.com/apps/token?grant_type=refresh_token&refresh_token=asdXCVCVAS_218kjashf_asdasd2ASD_223x&client_id=5430012&client_secret=012sds23dlkjQsd' -H 'Accept: application/json' -H 'Content-Type: application/json'
+You will receive a response containing the new values of the "accessToken" and "refreshToken" keys. You can safely use these new values while the old values of the same keys are automatically invalidated.
+
+Sending a Protobuf Message¶
+Alternatively, you can send the ProtoOARefreshTokenReq and receive the ProtoOARefreshTokenRes message containing new valid tokens.
+
+
+C#
+Python
+_disposables.Add(_client.OfType<ProtoOARefreshTokenRes>().Subscribe(OnRefreshTokenResponse));
+private static void OnRefreshTokenResponse(ProtoOARefreshTokenRes response) 
+{
+    _token = new Token 
+    {
+        AccessToken = response.AccessToken,
+        RefreshToken = response.RefreshToken,
+        ExpiresIn = DateTimeOffset.FromUnixTimeMilliseconds(response.ExpiresIn),
+        TokenType = response.TokenType,
+    }
+}
+var refreshTokenReq = new ProtoOARefreshTokenReq
+    {
+        refreshToken = {your_refresh_token}, // Add your refresh token here
+    };
+await _client.SendMessage(applicationAuthReq);
+
+Using the Playground¶
+The playground provides a quick means for attaining an access token for your own cTID, allowing you to quickly and easily develop and test your app before distributing it among its target audience.
+
+To access the playground, go to the 'Applications' page and click on the 'Playground' button. In the newly appeared window, select the scope of the application and press the 'Get Token' button.
+
+Afterward, you should see the following page.
+
+
+
+You can use the access token and the refresh token for sending messages to the API while authenticated under your own cTID.
+
+
+
+Sending/Receiving JSON¶
+In this tutorial, we explain how you can send and receive JSON messages.
+
+TCP and WebSocket
+
+When working with JSON, you can use either a TCP connection or a WebSocket connection.
+
+Sending JSON¶
+If you choose to use JSON in your integration, you will have to send strings containing valid JSON to the cTrader backend. The JSON objects passed as these strings have to contain the following keys.
+
+Key	Value Data Type	Definition
+"clientMsgId"	string	The unique ID of a message. This ID has to be generated and assigned by on the client side.
+"payloadType"	integer	The integer representing the message message. A full list of valid payload types is included in the ProtoOAPayloadType.
+"payload"	JSON object	A nested JSON object containing the actual contents of the message.
+An example of a valid string (representing the ProtoOAApplicationAuthReq message) can be found below.
+
+"{"clientMsgId": "cm_id_2", "payloadType": 2100, "payload": {"clientId": "34Rsd_T098asHkl","clientSecret": "validClientSecret"}}"
+To send correct JSON strings, you will need to create a custom mechanism for serialisation in your chosen programming language.
+
+In the below examples, we define just several approaches to handling serialisation. You can (and should) implement your own depending on your preferred programming language and design pattern(s).
+
+
+C#
+Python
+We create a base class for all Open API messages and, for demonstration purposes, define the class for ProtoOAApplicationAuthReq.
+
+import uuid
+import json
+
+class OpenAPIMessage:
+
+def payloadType(self):
+    pass
+
+def payload(self):
+    pass
+
+def clientMsgId(self):
+    pass
+
+def asJsonString(self):
+    pass
+
+
+class ApplicationAuthReq(OpenAPIMessage):
+
+def __init__(self, clientId, clientSecret, clientMsgId = str(uuid.uuid4())):
+    self.clientId = clientId
+    self.clientSecret = client_secret
+    self.payloadType = 2100
+    self.clientMsgId = clientMsgId
+    self.payload = {"clientId": self.clientId, "clientSecret": self.clientSecret}
+
+
+
+def asJsonString(self):
+    return json.dumps({"clientMsgId": self.clientMsgId, "payloadType": self.payloadType, "payload": self.payload})
+
+After implementing the required logic, you should be able to send new messages to the cTrader backend by creating new instances of the classes representing these messages and then passing them to your preferred TCP or WebSocket client.
+
+Receiving JSON¶
+To receive and process JSON messages, you have to implement a method for deserialising a JSON string into an representation of an Open API message.
+
+To implement this method, you may find it helpful to initialise a map (or a dictionary) where payload types can be keys with the names of classes representing messages acting as values. For exception handling purposes, you may want to verify whether the payload type of the message you have received is a key in this map or dictionary. If such a key exists, you can deserialise the message using any suitable logics.
+
+After implementing such a method, you may use it as a callback that is triggered every time you receive a new message.
+
+
+C#
+Python
+We add the following method to our ApplicationAuthReq class.
+
+@staticmethod
+def fromJson(jsonDct):
+    return ApplicationAuthReq(clientId=jsonDct['payload']['clientId'], clientSecret=jsonDct['payload']['clientSecret'], clientMsgId=jsonDct['clientMsgId'])
+We then add our readMessage callback and retrieve a payload from a dictionary.
+
+class MessageReceivedCallbacks:
+
+messagesDict = {2100: ApplicationAuthReq}
+
+@staticmethod
+def readMessage(jsonString):
+    json_dct = json.loads(jsonString)
+    payloadType = jsonDct['payloadType']
+    return MessageReceivedCallbacks.messagesDict[payloadType].fromJson(jsonDct)
+Downcasting
+
+As Python is duck-typed, there is no need to handle downcasting separately. You can deserialise the JSON string into the required type when receiving it.
+
+
+
+
+
+Sending/Receiving Protobuf Messages¶
+The process of sending and receiving a message differs between the TCP and WebSocket standards. Below, we explain this process in detail for both types of connections.
+
+Using TCP¶
+Sending a Message¶
+To send a message via a TCP connection, do the following.
+
+Change the Protobuf message to an array of bytes (using the Protobuf encoding) by using the official Google Protocol Buffer SDK for your chosen programming language.
+
+Get the length of the array created during Step 1. Create a new byte array created from this integer. Reverse the new byte array.
+
+Concatenate the new byte array and the byte array containing the original Protobuf message.
+
+Send the concatenated array to the connection stream.
+
+The examples below demonstrate how these steps are performed in the official Open API SDKs.
+
+
+C#
+Python
+private async Task WriteTcp(byte[] messageByte, CancellationToken cancellationToken)
+{
+    byte[] array = BitConverter.GetBytes(messageByte.Length).Reverse().Concat(messageByte)
+        .ToArray();
+    await _sslStream.WriteAsync(array, 0, array.Length, cancellationToken).ConfigureAwait(continueOnCapturedContext: false);
+    await _sslStream.FlushAsync(cancellationToken).ConfigureAwait(continueOnCapturedContext: false);
+}
+
+Reading a Message¶
+Asynchronous Code
+
+All Open API SDKs rely on asynchronous execution, meaning that they do not wait for messages to arrive but, instead, react to dynamically arriving messages. As a rresult, receiving a message is typically done via event handlers
+
+To read a message, you will have to perform a sequence of actions that reverses the steps required for sending a message.
+
+Receive the first four bytes of a byte array (remember, they denote the message length). Reverse these four bytes and change them to an integer.
+
+Read X amount of bytes from a stream where X is the integer you have gotten during Step 1.
+
+Use the Google Protobuf SDK to deserialize the message into a valid ProtoMessage.
+
+Use the payloadType field of the ProtoMessage object to find its actual type. Via the Google Protobuf SDK, change the ProtoMessage to an object of the needed ProtoOA... type.
+
+The code snippets below demonstrate how the official Open API SKDs approach reading messages.
+
+
+C#
+Python
+_tcpClient = new TcpClient
+{
+    LingerState = new LingerOption(enable: true, 10)
+};
+await _tcpClient.ConnectAsync(Host, Port).ConfigureAwait(continueOnCapturedContext: false);
+SslStream _sslStream = new SslStream(_tcpClient.GetStream(), leaveInnerStreamOpen: false);
+await _sslStream.AuthenticateAsClientAsync(Host).ConfigureAwait(continueOnCapturedContext: false);
+
+        private async void ReadTcp(CancellationToken cancellationToken)
+    {
+        byte[] dataLength = new byte[4];
+        byte[] data = null;
+        try
+        {
+            while (!IsDisposed)
+            {
+                int num = 0;
+                do
+                {
+                    int count = dataLength.Length - num;
+                    int num2 = num;
+                    num = num2 + await _sslStream.ReadAsync(dataLength, num, count, cancellationToken).ConfigureAwait(continueOnCapturedContext: false);
+                    if (num == 0)
+                    {
+                        throw new InvalidOperationException("Remote host closed the connection");
+                    }
+                }
+                while (num < dataLength.Length);
+                int length = GetLength(dataLength);
+                if (length <= 0)
+                {
+                    continue;
+                }
+
+                data = ArrayPool<byte>.Shared.Rent(length);
+                num = 0;
+                do
+                {
+                    int count2 = length - num;
+                    int num2 = num;
+                    num = num2 + await _sslStream.ReadAsync(data, num, count2, cancellationToken).ConfigureAwait(continueOnCapturedContext: false);
+                    if (num == 0)
+                    {
+                        throw new InvalidOperationException("Remote host closed the connection");
+                    }
+                }
+                while (num < length);
+                ProtoMessage protoMessage = ProtoMessage.Parser.ParseFrom(data, 0, length);
+                ArrayPool<byte>.Shared.Return(data);
+                OnNext(protoMessage);
+            }
+        }
+        catch (Exception innerException)
+        {
+            if (data != null)
+            {
+                ArrayPool<byte>.Shared.Return(data);
+            }
+
+            ReceiveException exception = new ReceiveException(innerException);
+            OnError(exception);
+        }
+    }
+
+    private int GetLength(byte[] lengthBytes)
+    {
+        Span<byte> span = lengthBytes.AsSpan();
+        span.Reverse();
+        return BitConverter.ToInt32(span);
+    }
+
+Using WebSocket¶
+Sending a Message¶
+To send a message over a WebSocket connection, perform the following actions.
+
+Serialize the message into any suitable data format (e.g., a string).
+
+Add the serialized message to your send queue.
+
+The examples below demonstrate how these actions are performed in the official Open API SDKs.
+
+
+C#
+Python
+The C# SDK uses the WebsocketClient class which is a part of the Websocket.Client package. As shown below, the WebsocketClient.Send() method works as follows.
+
+public void Send(byte[] message)
+{
+    Websocket.Client.Validations.Validations.ValidateInput(message, "message");
+    _messagesBinaryToSendQueue.Writer.TryWrite(new ArraySegment<byte>(message));
+}
+As you can see, the client simply adds an array segment to the send queue.
+
+
+Receiving a Message¶
+To receive a message over a WebSocket connection, do the following.
+
+Retrieve the data received from the cTrader backend.
+
+Deserialize data into a valid Protobuf message.
+
+For an illustration of how this is done in the official Open API SDKs, see the below snippets.
+
+
+C#
+Python
+To receive messages, a WebsocketClient needs to be subscribed to a callback function that handles what the client does on accepting a new message.
+
+var client = new WebsocketCliebnt();
+client.MessageReceived.Subscribe(msg => {Console.WriteLine(msg);})
+Before subscribing, the .NET SDK parses the message into a Protobuf message. The necessary subscriptions are added in the body of the ConnectWebSocket() callback.
+
+private async Task ConnectWebScoket()
+{
+    DefaultInterpolatedStringHandler defaultInterpolatedStringHandler = new DefaultInterpolatedStringHandler(7, 2);
+    defaultInterpolatedStringHandler.AppendLiteral("wss://");
+    defaultInterpolatedStringHandler.AppendFormatted(Host);
+    defaultInterpolatedStringHandler.AppendLiteral(":");
+    defaultInterpolatedStringHandler.AppendFormatted(Port);
+    Uri url = new Uri(defaultInterpolatedStringHandler.ToStringAndClear());
+    _websocketClient = new WebsocketClient(url, () => new ClientWebSocket())
+    {
+        IsTextMessageConversionEnabled = false,
+        ReconnectTimeout = null,
+        IsReconnectionEnabled = false,
+        ErrorReconnectTimeout = null
+    };
+    _webSocketMessageReceivedDisposable = _websocketClient.MessageReceived.Select((ResponseMessage msg) => ProtoMessage.Parser.ParseFrom(msg.Binary)).Subscribe(new Action<ProtoMessage>(OnNext));
+    _webSocketDisconnectionHappenedDisposable = _websocketClient.DisconnectionHappened.Subscribe(new Action<DisconnectionInfo>(OnWebSocketDisconnectionHappened));
+    await _websocketClient.StartOrFail();
+}
+In the OnNext() callback, the ProtoMessage is passed to the MessageFactory.GetMessage() callback.
+
+private void OnNext(ProtoMessage protoMessage)
+{
+    foreach (KeyValuePair<int, IObserver<IMessage>> observer2 in _observers)
+    {
+        observer2.Deconstruct(out var _, out var value);
+        IObserver<IMessage> observer = value;
+        try
+        {
+            IMessage message = MessageFactory.GetMessage(protoMessage);
+            if (protoMessage.HasClientMsgId || message == null)
+            {
+                observer.OnNext(protoMessage);
+            }
+
+            if (message != null)
+            {
+                observer.OnNext(message);
+            }
+        }
+        catch (Exception innerException)
+        {
+            ObserverException exception = new ObserverException(innerException, observer);
+            OnError(exception);
+        }
+    }
+}
+
+
+
+
+
+Attaining Historical Data¶
+Attaining and interpreting symbol data (e.g., the open and close prices of all bars for a specific period) is essential in any application that has any of the following functionalities.
+
+Charts. To construct bar or line charts, you need to know both historical and live bar/quote data.
+Market statistics. If you want to display market statistics (such as daily price changes for individual symbols), you have to attain both historical and live prices.
+Replays. In your application, you may allow traders to 'go back in time' and trade on historical data. To do so, you would need to attain and process past bar and/or tick data.
+In this tutorial, we will show how you can attain and process historical and live bar/tick data as well as live depth quotes.
+
+Note that the tutorial only provides a code snippet for attaining historical bar data. As the core logic remains the same regardless of the action you are performing, you can adapt this snippet to attain other types of data.
+
+Operating With JSON
+
+When operating with JSON, you can still reuse code from this tutorial; however, you would need to slightly modify it depending on your approach to serialisation/deserialisation.
+
+Attaining Historical Bar Data¶
+To receive historical bars data, perform the following actions.
+
+Initialise an object representing the ProtoOAGetTrendbarsReq message.
+Fill the object properties with the required ctidTraderAccountId, the symbolId, the ProtoOATrendbarPeriod, the count of trendars to return, and the toTimestamp and fromTimestamp Unix timestamps.
+Timestamp Constraints
+
+Note that there are some constraints on the maximum possible distance between the toTimestamp and the fromTimestamp. These constaints depend on the specified ProtoOATrendPeriod. To learn more, click here.
+
+Send the newly created message and receive a response of the ProtoOAGetTrendbarsRes type. Access its trendbar field to attain a list of trend bars.
+Transform the data from the relative format to the actual symbol price. To do so, first, get the low price of a trendbar and divide it by 100000. Then, round the result to symbol digits (e.g., two numbers after the delimiter). To attain the high, open, and close prices of a trendbar, add the trendbar delta of each of these prices to the trendbar low price. Afterward, divide each number by 100000 and round the result to symbol digits.
+You can complete these actions by reusing the code below.
+
+
+C#
+Python
+def sendProtoOAGetTrendbarsReq(ctidTraderAccountId, weeks, period, symbolId, clientMsgId = None):
+    request = ProtoOAGetTrendbarsReq()
+    request.ctidTraderAccountId = ctidTraderAccountId
+    request.period = ProtoOATrendbarPeriod.Value(period)
+    request.fromTimestamp = int(calendar.timegm((datetime.datetime.utcnow() - datetime.timedelta(weeks=int(weeks))).utctimetuple())) * 1000
+    request.toTimestamp = int(calendar.timegm(datetime.datetime.utcnow().utctimetuple())) * 1000
+    request.symbolId = int(symbolId)
+    deferred = client.send(request, clientMsgId = clientMsgId)
+
+def getPriceFromRelative(symbol, relative): round(relative / 100000.0, symbol.digits)
+
+def onHistoricalTrendbarsReceived(message):
+
+    trendbars = message.trendbars
+
+    data = []
+
+    for trendbar in trenbars:
+        data.append(Trendbar(low=getPriceFromRelative(symbol, trendbar.low), high=getPriceFromRelative(symbol, trendbar.low + int(trendbar.deltaHigh)), open=getPriceFromRelative(symbol, trendbar.low + int(trendbar.deltaHigh)), close=getPriceFromRelative(symbol, trendbar.low +int(trendbar.deltaClose))))
+
+    return data
+
+Attaining Historical Tick Data¶
+To receive historical tick data, perform the following actions.
+
+Initialise an object representing the ProtoOAGetTickDataReq message.
+Fill the object properties with the required ctidTraderAccountId, the symbolId, the quote type as well as the fromTimestamp and the toTimestamp.
+Timestamp Constraints
+
+It is impossible to request historical tick data for a period larger than one week. As such, the difference between the specified toTimestamp and the fromTimestamp must not be larger than 604800000.
+
+Send the newly created message and receive a response of the ProtoOAGetTickDataRes type. Access its tickData field to attain a list of elements of the ProtoOATickData type.
+Transform the data from the relative format to the actual symbol price. To do so, divide each tick by 100000 and round the result to symbol digits.
+Requesting a Large Number of Ticks
+
+There exists a limit on the number of ticks that can be returned in a ProtoOAGetTickDataRes message. If this limit is exceeded (e.g., there has been a significant number of ticks during the specified period), the ProtoOAGetTickDataRes message will only include the first X ticks, where X is a number lower than the tick limit. The exact limit depends on the configuration of the cTrader backend.
+
+To check if there exist more ticks than have been returned in the received message, use the hasMore flag.
+
+Attaining Live Bars Data¶
+To receive live bars, perform the following actions.
+
+Initialise a variable representing the ProtoOAGetTrendbarsReq message.
+Fill the object properties with the required ctidTraderAccountId, the symbolId, the ProtoOATrendbarPeriod, the count of trendars to return, and the toTimestamp and fromTimestamp Unix timestamps.
+Timestamp Constraints
+
+Note that there are some constraints on the maximum possible distance between the toTimestamp and the fromTimestamp. These constaints depend on the specified ProtoOATrendPeriod. To learn more, click here.
+
+Send the newly created message and receive a response of the ProtoOAGetTrendbarsRes type. Access its trendbar field to attain a list of trend bars.
+Transform the data from the relative format to the actual symbol price. To do so, first get the low price of a trendbar and divide it by 100000. Then, round the result to symbol digits (e.g., two numbers after the delimiter). To attain the high, open, and close prices of a trendbar, add the trendbar delta of each of these prices to the trendbar low price. Afterward, divide each number by 100000 and round the result to symbol digits.
+
+Initialise an object representing the ProtoOASubscribeLiveTrendbarReq message.
+
+Fill the object properties with the required ctidTraderAccountId, the ProtoOATrendbarPeriod, and the symbolId.
+Do the same for an object representing the ProtoOASubscribeSpotsReq message.
+Send the ProtoOASubscribeSpotsReq message and the ProtoOASubscribeLiveTrendbarReq message in that order and receive responses of the ProtoOASubscribeSpotsRes and the ProtoOASubscribeLiveTrenbarsRes types. At this point, you are subscribed to live bars data and you should receive messages of the ProtoOASpotEvent type.
+Subscribing to Live Trendbars
+
+Note that successfully subscribing to live trendbars first requires a subscription to spot events.
+
+When you receive a new ProtoOASpotEvent message, use its trendbar field to get the data for the last closed bar.
+Transform the data from the relative format to the actual symbol prices. To do so, first, get the low price of a trendbar and divide it by 100000. Then, round the result to symbol digits (e.g., two numbers after the delimiter). To attain the high, open, and close prices of a trendbar, add the trendbar delta of each of these prices to the trendbar low price. Afterward, divide each number by 100000 and round the result to symbol digits.
+To unsubscribe from live trendbar data, you can always send the ProtoOAUnsubscribeLiveTrendbarsReq message containing the symbolId, the period, and your ctidTraderAccountId. In case your request is successful, you should receive a response of the ProtoOAUnsubscribeLiveTrenbarRes type. Your subscription to spot events will still remain.
+
+Attaining Live Quotes¶
+To receive live bid/ask quotes for a symbol, perform the following actions.
+
+Initialise an object representing the ProtoOASubscribeSpotsReq message.
+Fill the object properties with the ctidTraderAccountId, the symbolId, and, optionally, the subscribeToSpotTimestamp bool.
+Send the newly created message and receive a response of the ProtoOASubscribeSpotsRes type. At this point, you are subscribed to live quotes data and you should receive messages of the ProtoOASpotEvent type.
+When you receive a new ProtoOASpotEvent message, access its bid and/or ask fields to attain the latest quotes. Note that you still have to transform the data into an actual price value by dividing it by 100000 and rounding it to the symbol digits.
+Bid/Ask Fields
+
+Note that as the bid and ask fields are optional, you may not necessarily see ProtoOASpotEvent messages where both are specified.
+
+To unsubscribe from quotes data, you can always send the ProtoOAUnsubscribeSpotsReq message containing the symbolId and your ctidTraderAccountId. In case your request is successful, you should receive a response of the ProtoOAUnsubscribeSpotsRes type. At this point, you should stop receiving spot events.
+
+Depth Quotes¶
+Last but not least, you can also receive live depth or Level II quotes for a symbol. To do so, perform the following actions.
+
+You can subscribe and receive live depth or Level II quotes for a symbol from the API.
+
+Initialise an object representing the ProtoOASubscribeDepthQuotesReq message.
+Fill the object properties with the ctidTraderAccountId and the the symbolId.
+Send the newly created message and receive a response of the ProtoOASubscribeDepthQuotesRes type. At this point, you are subscribed to depth quotes, meaning that you should start receiving ProtoOADepthEvent messages.
+When you receive a new ProtoOADepthEvent message, you will need to use its newQuotes and deletedQuotes fields to get the latest depth data. You will also need to transform the data into an actual price value by dividing it by 100000 and rounding the result to the symbol digits. You will also need to transform the depth quote size into units by dividing it by 100.
+To unsubscribe from depth events, you can always use the ProtoOAUnsubscribeDepthQuotesReq message while specifying the symbolId and the ctidTraderAccountId. You should receive a message of the ProtoOAUnsubscribeDepthQuotesRes type; afterward, you should stop receiving depth events.
+
+
+
+
+
+
+Calculating Profit/Loss¶
+Calculating P&L is an essential use case that needs to be implemented by nearly every imaginable cTrader Open API application/service.
+
+Manually calculating P&L is a difficult process as the calculation needs to account for the position size and the possible conversion between the quote asset of the bought/sold symbol and the account deposit currency.
+
+Fortunately, you can simply ask the cTrader backend to calculate P&L for you by sending the ProtoOAGetPositionUnrealizedPnLReq message. You should receive the ProtoOAGetPositionUnrealizedPnLRes message containing the ProtoOAPositionUnrealizedPnL model message in one of its fields.
+
+Note
+
+ProtoOAGetPositionUnrealizedPnLRes contains information about the P&Ls of all currently open positions of the account with the specified ctidTraderAccountId in its repeated positionUnrealizedPnL field.
+
+Rate Limits
+
+Requesting P&L is a non-historical request, meaning that you can only perform a maximum of 50 such requests per second. We recommend refreshing P&L once every two-three seconds so that there is no risk of exceeding rate limits.
+
+To learn more about sending and receiving messages, click here for a tutorial on Protobufs or here for a tutorial on JSON.
+
+When operating with Protobuf, you could use the classes generated by the compiler for serialising/deserialising the message for attaining P&L rates. When operating with JSON, you would need to create such classes yourself. Here is how they could look like.
+
+
+C#
+Python
+class OpenAPIModelMessage:
+    def __init__(self):
+        pass
+
+class PositionUnrealizedPnL(OpenAPIModelMessage):
+    def __init__(self, position_id, gross_unrealized_pnl, net_unrealized_pnl):
+        self.position_id = position_id
+        self.gross_unrealized_pnl = gross_unrealized_pnl
+        self.net_unrealized_pnl = net_unrealized_pnl
+
+class GetPositionUnrealizedPnLReq(OpenAPIMessage):
+    def __init__(self, ctid_trader_account_id, client_msg_id = str(uuid.uuid4())):
+        self.ctid_trader_account_id = ctid_trader_account_id
+        self.payload_type = 2187
+        self.client_msg_id = client_msg_id
+        self.payload = {"ctidTraderAccountId": self.ctid_trader_account_id}
+
+    def as_json_string(self):
+        return json.dumps({"clientMsgId": self.client_msg_id, "payloadType": self.payload_type, "payload": self.payload})
+
+    @staticmethod
+    def from_json(json_dct):
+        return GetPositionUnrealizedPnLReq(client_id=json_dct['payload']['clientId'], client_secret=json_dct['payload']['clientSecret'], client_msg_id=json_dct['clientMsgId'])
+
+class GetPositionUnrealizedPnLRes(OpenAPIMessage):
+    def __init__(self, ctid_trader_account_id, position_unrealized_pnl, money_digits, client_msg_id):
+        self.ctid_trader_account_id = ctid_trader_account_id
+        self.position_unrealized_pnl = position_unrealized_pnl
+        self.money_digits = money_digits
+        self.client_msg_id = client_msg_id
+
+    def as_json_string(self):
+        return json.dumps({"clientMsgId": self.client_msg_id, "payloadType": self.payload_type, "payload": self.payload})
+
+    @staticmethod
+    def from_json(json_dct):
+        return GetPositionUnrealizedPnLRes(ctid_trader_account_id=json_dct['payload']['clientSecret'], position_unrealized_pnl=json_dct['payload']['positionUnrealizedPnL'], money_digits=json_dct['payload']['moneyDigits'], client_msg_id=['clientMsgId'])
+
+
+
+
+
+Symbol Rate Conversion¶
+Symbol rate conversion is an essential action if you want your application to include any sort of functionality related to P&L calculations.
+
+Use Cases
+
+Performing symbol rate conversions is necessary when calculating commissions, swaps, and dividends. Commissions, swaps, and dividends are typically denoted in USD. However, depending on your broker and your preferences, your account deposit currency may be in any other asset rather than USD. To accurately define commissions, swaps, and dividends, you would need to know the exchange rate between USD and your account deposit currency.
+
+Conversion Chains
+
+Think of the price of each individual symbol as a conversion rate between its base asset and quote asset. The task of attaining conversion rates becomes complicated if there are no symbols that directly link a given asset to another asset. Fortunately, the cTrader backend can automatically create conversion chains that act as the shortest possible conversion paths from one asset to another.
+
+For example, if you want to convert EUR into NZD, and there is no EURNZD symbol on the trading server, cTrader will propose a chain that will serve as intermediate steps in the conversion process. Depending on symbol availability, such a chain could look like EURUSD-USDCAD-CADNZD, EURCFH-CFHUSD-USDNZD, or even EURCAD-CADUSD-USDCFH-CFHNZD.
+
+To convert between two assets, your app needs to perform the following actions.
+
+Access the IDs of the assets that you want to convert between.
+Attain a conversion chain that includes one or more 'light' symbols.
+Subscribe to and handle spot events.
+Follow the conversion chain and return the final conversion rate.
+Below, we explain each of these actions in detail.
+
+Access Asset IDs¶
+Asset IDs can be accessed directly as properties of the 'light' symbol entity (represented by the ProtoOALightSymbol model message). In addition, you can attain the ID of an account deposit currency directly from its related ProtoOaTrader entity.
+
+Note that the below example only attain asset IDs for one symbol. To perform the same operation for multiple symbols, you would need to add a loop or use another suitable solution (e.g., a map() method or equivalent).
+
+Working With JSON
+
+When working with JSON, you can still reuse the code below and other code snippets in this tutorial. However, make sure to replace the names of Proto... classes with the names of your custom classes and make the necessary modifications to account for your preferred TCP/WebSocket client.
+
+
+C#
+Python
+symbol is a variable representing a message of the ProtoOALightSymbol type.
+
+baseAssetId = symbol.BaseAsset.AssetId
+quoteAssetId = symbol.QuoteAsset.AssetId
+In the below example, we attain the ID of the deposit currency of the account object which represents the ProtoOATrader model message.
+
+depositAssetId = account.depositAssetId
+
+Attain a Conversion Chain¶
+To attain a valid conversion chain, your app needs to send the ProtoOASymbolsForConversionReq message with its firstAssetId and lastAssetId fields set to the IDs of the assets that you want to convert between. When you receive a response of the ProtoOASymbolsForConversionRes type, store its repeated symbol field inside a collection.
+
+Here is how you can perform this action via the official SDKs.
+
+
+C#
+Python
+def sendProtoOASymbolsForConversionReq(accountId, firstAssetId, lastAssetId):
+    request = ProtoOASymbolsForConversionReq()
+    request.ctidTraderAccountId = accountId
+    request.firstAssedId = firstAssetId
+    request.lastAssetId = lastAssetId
+Also add the following condition to the onMessageReceived callback.
+
+elif message.payloadType == ProtoOASymbolsForConversionRes().payloadType:
+    ProtoOASymbolsForConversionRes = Protobuf.extract(message)
+    conversionSymbols = ProtoOASymbolsForConversionRes.symbol
+
+Note
+
+We highly recommend attaining all conversion chain symbols for each asset when you first request and receive asset data from the server. Otherwise, you will have to send the ProtoOASymbolsForConversionReq message every time you need to convert rates which, in some cases, may be several times per second.
+
+Note
+
+As ProtoOALightSymbol entities do not contain any fields representing bid or ask prices, we highly recommend creating custom Symbol classes or equivalent so you can easily create new symbols programmatically and update their properties when certain events are triggered. You will have to convert light symbols into objects of this class separately.
+
+Subscribe to and Handle Spot Events¶
+To follow the conversion chain from start to finish, you need to subscribe to the ProtoOASpotEvent for all symbols included in the chain. This is done as follows via the official SDKs.
+
+
+C#
+Python
+We can use the following function to subscribe to ProtoOASpotEvent for a particular symbol. Note that it only subscribes to one symbol, meaning that you would need to call this function for every light symbol in your collection of conversion symbols.
+
+def sendProtoOASubscribeSpotsReq(symbolId, subscribeToSpotTimestamp = False, clientMsgId = None):
+    request = ProtoOASubscribeSpotsReq()
+    request.ctidTraderAccountId = currentAccountId
+    request.symbolId.append(int(symbolId))
+    request.subscribeToSpotTimestamp = subscribeToSpotTimestamp if type(subscribeToSpotTimestamp) is bool else bool(subscribeToSpotTimestamp)
+    deferred = client.send(request, clientMsgId = clientMsgId)
+    deferred.addErrback(onError)
+To handle spot events, we can add the following conditions to our onMessageReceived callback.
+
+elif message.paloadType == ProtoOASpotEvent().payloadType:
+    ProtoOASpotEvent = Protobuf.extract(message)
+    onSpotEvent(ProtoOASpotEvent)
+Finally, here is our onSpotEvent callback.
+
+def onSpotEvent(ProtoOASpotEvent):
+    iterableConversionSymbols = iter(conversionSymbols)
+    symbol = next(s for s in iterableConversionSymbols if s.symbolId == ProtoOASpotEvent.symbolId)
+
+    if symbol is None:
+        return
+
+    if ProtoOASpotEvent.hasBid == true:
+        bid = symbol.data.getPipsFromRelative()
+    if ProtoOASpotEvent.hasAsk == true:
+        ask = symbol.data.getPipsFromRelative()
+
+    if bid != symbol.bid:
+        symbol.bid = bid
+    if ask != symbol.ask
+        symbol.ask = ask
+In our Symbol class, the getPipsFromRelative function is defined as follows.
+
+import math
+
+def getPipsFromRelative(self, relative): return round((relative / 100000.0) / symbol.pipPosition, symbol.digits - symbol.pipPosition) ```
+
+Note that the values of the pipPosition and digits properties have to be attained separately.
+
+
+Follow the Conversion Chain and Return the Final Conversion Rate¶
+At this point, all symbols in your conversion chain should receive spot rates and you should be able to access accurate bid and ask prices for each symbol. All that is left is to 'travel' along the conversion chain and return the final rate. This can be done as follows.
+
+
+C#
+Python
+def getConversionRate(conversionSymbols):
+    conversionRate = 1
+    currentAsset = conversionSymbols[0].baseAsset
+
+    for symbol in conversionSymbols:
+        closePrice = symbol.bid #Replaced by symbol.ask when calculating P&L for short positions
+
+        if symbol.baseAsset == currentAsset:
+            conversionRate = conversionRate * closePrice
+            currentAsset = symbol.quoteAsset
+
+        else:
+            conversionRate = conversionRate * 1 / closePrice
+            currentAsset = symbol.baseAsset
+

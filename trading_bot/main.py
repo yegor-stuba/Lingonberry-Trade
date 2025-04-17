@@ -2,152 +2,211 @@
 Main entry point for the trading bot
 """
 
-import sys
 import os
+import sys
 import logging
-from pathlib import Path
-import argparse
 import asyncio
-
-# Add the parent directory to the path
-sys.path.insert(0, str(Path(__file__).parent.parent))
-
-from trading_bot.config import settings
-from trading_bot.services.trade_suggestion import TradeSuggestionService
-from trading_bot.bridges.mt5.server import run_server as run_mt5_server
 import threading
+import time
+import json
+import subprocess
+import requests
+from pathlib import Path
+
+from trading_bot.ui.telegram_bot import TelegramBot
+from trading_bot.strategy.signal_generator import SignalGenerator
+from trading_bot.data.data_processor import DataProcessor
+from trading_bot.config.settings import DASHBOARD_URL, DASHBOARD_ENABLED
+from trading_bot.ui.web_dashboard.app import app
+from apscheduler.schedulers.background import BackgroundScheduler
+from trading_bot.journal.trade_journal import TradeJournal
 
 # Configure logging
 logging.basicConfig(
-    level=settings.LOG_LEVEL,
-    format=settings.LOG_FORMAT,
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     handlers=[
-        logging.FileHandler(settings.LOG_FILE),
-        logging.StreamHandler()
+        logging.StreamHandler(),
+        logging.FileHandler("trading_bot.log")
     ]
 )
 logger = logging.getLogger(__name__)
 
-async def async_main(args):
-    """Async main function"""
-    logger.info("Starting Trading Bot...")
-    
-    # Start MT5 bridge server if requested
-    mt5_server_thread = None
-    if args.start_mt5_bridge:
-        logger.info("Starting MT5 bridge server...")
-        mt5_server_thread = threading.Thread(target=run_mt5_server)
-        mt5_server_thread.daemon = True
-        mt5_server_thread.start()
-        logger.info("MT5 bridge server started in background")
-        
-        # Give the server time to start
-        await asyncio.sleep(2)
-    
-    # Initialize the trade suggestion service
-    service = TradeSuggestionService(
-        use_web_scraper=args.use_web_scraper,
-        use_mt5=args.use_mt5,
-        browser_type=args.browser
-    )
+# Global variable to store ngrok process
+ngrok_process = None
+actual_dashboard_url = None
+
+def start_ngrok(port):
+    """Start ngrok and return the public URL"""
+    global ngrok_process
     
     try:
-        # Initialize the service
-        logger.info("Initializing trade suggestion service...")
-        init_success = await service.initialize()
+        # Check if ngrok is installed
+        try:
+            subprocess.run(["ngrok", "--version"], check=True, capture_output=True)
+        except (subprocess.CalledProcessError, FileNotFoundError):
+            logger.error("ngrok is not installed or not in PATH. Please install it first.")
+            return None
         
-        if not init_success:
-            logger.error("Failed to initialize trade suggestion service")
-            return
+        # Start ngrok process
+        ngrok_process = subprocess.Popen(
+            ["ngrok", "http", str(port)],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE
+        )
+        logger.info(f"Started ngrok process (PID: {ngrok_process.pid})")
         
-        logger.info("Trade suggestion service initialized successfully")
+        # Wait for ngrok to start
+        time.sleep(2)
         
-        if args.symbol:
-            # Get trade suggestion for a specific symbol
-            logger.info(f"Getting trade suggestion for {args.symbol} in {args.market} market...")
-            result = await service.get_trade_suggestions(args.market, args.symbol)
-            
-            if result['success']:
-                suggestions = result.get('suggestions', [])
-                if suggestions:
-                    logger.info(f"Found {len(suggestions)} trade suggestions for {args.symbol}")
-                    
-                    # Print details of each suggestion
-                    for i, suggestion in enumerate(suggestions):
-                        logger.info(f"Suggestion {i+1}:")
-                        logger.info(f"  Direction: {suggestion['direction']}")
-                        logger.info(f"  Entry: {suggestion['entry']}")
-                        logger.info(f"  Stop Loss: {suggestion['stop_loss']}")
-                        logger.info(f"  Take Profit: {suggestion['take_profit']}")
-                        logger.info(f"  Risk-Reward: {suggestion['risk_reward']:.2f}")
-                        logger.info(f"  Reason: {suggestion['reason']}")
-                        if 'position_info' in suggestion and 'recommended' in suggestion['position_info']:
-                            logger.info(f"  Position Size: {suggestion['position_info']['recommended']}")
-                else:
-                    logger.info(f"No trade suggestions found for {args.symbol}")
+        # Get the public URL from ngrok API
+        try:
+            response = requests.get("http://localhost:4040/api/tunnels")
+            tunnels = json.loads(response.text)["tunnels"]
+            if tunnels:
+                public_url = tunnels[0]["public_url"]
+                logger.info(f"ngrok public URL: {public_url}")
+                return public_url
             else:
-                logger.error(f"Error getting trade suggestions: {result.get('message', 'Unknown error')}")
-        else:
-            # Scan the market
-            logger.info(f"Scanning {args.market} market...")
-            scan_results = await service.get_market_scanner_results(args.market)
+                logger.error("No ngrok tunnels found")
+                return None
+        except Exception as e:
+            logger.error(f"Error getting ngrok URL: {e}")
+            return None
             
-            if scan_results:
-                logger.info(f"Found {len(scan_results)} potential opportunities")
-                
-                # Print details of the top 5 results
-                for i, result in enumerate(scan_results[:5]):
-                    logger.info(f"Opportunity {i+1}:")
-                    logger.info(f"  Symbol: {result['symbol']}")
-                    logger.info(f"  Bias: {result['bias']}")
-                    logger.info(f"  Current Price: {result['current_price']}")
-                    logger.info(f"  Strong Order Blocks: {result['has_strong_ob']}")
-                    logger.info(f"  Score: {result['score']}")
-                
-                # Get detailed suggestions for the top result
-                if scan_results:
-                    top_symbol = scan_results[0]['symbol']
-                    logger.info(f"Getting detailed suggestion for top opportunity: {top_symbol}")
-                    
-                    detailed_result = await service.get_trade_suggestions(args.market, top_symbol)
-                    if detailed_result['success'] and detailed_result.get('suggestions'):
-                        suggestion = detailed_result['suggestions'][0]
-                        logger.info(f"Trade suggestion for {top_symbol}:")
-                        logger.info(f"  Direction: {suggestion['direction']}")
-                        logger.info(f"  Entry: {suggestion['entry']}")
-                        logger.info(f"  Stop Loss: {suggestion['stop_loss']}")
-                        logger.info(f"  Take Profit: {suggestion['take_profit']}")
-                        logger.info(f"  Risk-Reward: {suggestion['risk_reward']:.2f}")
-                        logger.info(f"  Reason: {suggestion['reason']}")
-            else:
-                logger.info(f"No opportunities found in {args.market} market")
-        
-        logger.info("Trading Bot completed successfully")
-        
     except Exception as e:
-        logger.error(f"Error running bot: {e}", exc_info=True)
-        sys.exit(1)
-    
-    finally:
-        # Close the service
-        await service.close()
+        logger.error(f"Error starting ngrok: {e}")
+        return None
+
+def stop_ngrok():
+    """Stop the ngrok process"""
+    global ngrok_process
+    if ngrok_process:
+        logger.info(f"Stopping ngrok process (PID: {ngrok_process.pid})")
+        ngrok_process.terminate()
+        ngrok_process = None
+
+def run_dashboard():
+    """Run the web dashboard in a separate thread"""
+    try:
+        logger.info(f"Starting web dashboard on {DASHBOARD_URL}")
+        # Parse the port from DASHBOARD_URL or use default 5000
+        port = 5000
+        if ":" in DASHBOARD_URL:
+            try:
+                port = int(DASHBOARD_URL.split(":")[-1].split("/")[0])
+            except (ValueError, IndexError):
+                pass
+        
+        # On macOS, use port 8080 instead of 5000 to avoid AirPlay conflict
+        if sys.platform == 'darwin' and port == 5000:
+            port = 8080
+            logger.info(f"Using port {port} on macOS to avoid AirPlay conflict")
+        
+        # Make sure to bind to 0.0.0.0 to allow external connections
+        app.run(debug=False, host='0.0.0.0', port=port, use_reloader=False)
+    except Exception as e:
+        logger.error(f"Error starting web dashboard: {e}")
+
+# Add a scheduled task to update trade statuses
+def update_trade_statuses():
+    """Update the status of pending and active trades"""
+    try:
+        logger.info("Updating trade statuses...")
+        trade_journal = TradeJournal()
+        
+        # Create a data processor for getting current prices
+        data_processor = DataProcessor()
+        
+        # Create an event loop for async operations
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        
+        # Run the check functions
+        loop.run_until_complete(trade_journal.check_pending_trades(data_processor))
+        loop.run_until_complete(trade_journal.check_active_trades(data_processor))
+        
+        # Close the loop
+        loop.close()
+        
+        logger.info("Trade statuses updated successfully")
+    except Exception as e:
+        logger.error(f"Error updating trade statuses: {e}")
+
+def get_ngrok_url():
+    """Get the public URL from ngrok"""
+    try:
+        response = requests.get("http://localhost:4040/api/tunnels")
+        tunnels = json.loads(response.text)["tunnels"]
+        for tunnel in tunnels:
+            if tunnel["proto"] == "https":
+                return tunnel["public_url"]
+        return None
+    except Exception as e:
+        logger.error(f"Error getting ngrok URL: {e}")
+        return None
 
 def main():
-    """Main function"""
-    logger.info("Starting Trading Bot...")
+    """Main function to run the bot"""
+    logger.info("Starting trading bot...")
     
-    # Parse command line arguments
-    parser = argparse.ArgumentParser(description='Trading Bot')
-    parser.add_argument('--use-web-scraper', action='store_true', help='Use web scraper for data')
-    parser.add_argument('--use-mt5', action='store_true', help='Use MT5 for data')
-    parser.add_argument('--start-mt5-bridge', action='store_true', help='Start MT5 bridge server')
-    parser.add_argument('--market', type=str, default='forex', help='Market to scan (forex, crypto, indices, metals)')
-    parser.add_argument('--symbol', type=str, help='Symbol to analyze (e.g., EURUSD)')
-    parser.add_argument('--browser', type=str, default='chromium', help='Browser to use (chromium, firefox, edge)')
-    args = parser.parse_args()
+    # Create data directories if they don't exist
+    data_dirs = ["data", "charts", "charts/crypto", "charts/forex", "journal"]
+    for directory in data_dirs:
+        Path(directory).mkdir(parents=True, exist_ok=True)
     
-    # Run the async main function
-    asyncio.run(async_main(args))
+    # Check if we need to start ngrok
+    dashboard_url = DASHBOARD_URL
+    ngrok_process = None
+    
+    if "localhost" in DASHBOARD_URL or "127.0.0.1" in DASHBOARD_URL:
+        logger.info("Dashboard URL is set to localhost, starting ngrok...")
+        
+        # Start ngrok in a subprocess
+        port = 8080  # Use the port we set for Flask
+        if sys.platform == 'darwin':
+            # On macOS, avoid port 5000 which is used by AirPlay
+            port = 8080
+        
+        ngrok_command = ["ngrok", "http", str(port)]
+        ngrok_process = subprocess.Popen(ngrok_command, stdout=subprocess.PIPE)
+        logger.info(f"Started ngrok process (PID: {ngrok_process.pid})")
+        
+        # Wait for ngrok to start
+        time.sleep(2)
+        
+        # Get the public URL
+        ngrok_url = get_ngrok_url()
+        if ngrok_url:
+            dashboard_url = ngrok_url
+            logger.info(f"ngrok public URL: {ngrok_url}")
+            logger.info(f"Dashboard will be accessible at: {dashboard_url}")
+    
+    # Start the web dashboard in a separate thread
+    if DASHBOARD_ENABLED:
+        dashboard_thread = threading.Thread(target=run_dashboard, daemon=True)
+        dashboard_thread.start()
+        logger.info("Web dashboard started in background thread")
+    
+    # Add a scheduled task to update trade statuses
+    scheduler = BackgroundScheduler()
+    scheduler.add_job(update_trade_statuses, 'interval', hours=1)
+    scheduler.start()
+    logger.info("Trade status update scheduler started")
+    
+    # Initialize the Telegram bot with the correct dashboard URL
+    telegram_bot = TelegramBot(dashboard_url=dashboard_url)
+    
+    # Run the bot
+    telegram_bot.run()
+    
+    # Clean up ngrok process on exit
+    if ngrok_process:
+        ngrok_process.terminate()
 
 if __name__ == "__main__":
+    # Set a default event loop policy that works well with asyncio
+    if sys.platform == 'win32':
+        asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
+    
     main()

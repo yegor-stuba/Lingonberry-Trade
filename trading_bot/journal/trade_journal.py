@@ -1,214 +1,236 @@
 """
-Trade journaling functionality
+Trade journal module for recording and tracking trades
 """
 
-import sqlite3
-import pandas as pd
 import logging
+import json
 import os
-from datetime import datetime
-import pytz
-
-from trading_bot.utils import helpers
-from trading_bot.config import settings
+import pandas as pd
+from datetime import datetime, timedelta
+from pathlib import Path
+import uuid
+import sqlite3
 
 logger = logging.getLogger(__name__)
 
 class TradeJournal:
-    """Class for managing trade journal entries"""
+    """Class for recording and tracking trades"""
     
-    def __init__(self, db_path=settings.DB_PATH):
+    def __init__(self, db_path=None):
         """Initialize the trade journal"""
-        self.db_path = db_path
-        self._create_db_if_not_exists()
+        self.db_path = db_path or Path("data/trade_journal.db")
+        self._ensure_db_exists()
     
-    def _create_db_if_not_exists(self):
-        """Create database and tables if they don't exist"""
-        try:
-            # Create directory if it doesn't exist
-            os.makedirs(os.path.dirname(self.db_path), exist_ok=True)
-            
-            conn = sqlite3.connect(self.db_path)
-            cursor = conn.cursor()
-            
-            # Create trades table
-            cursor.execute('''
-                CREATE TABLE IF NOT EXISTS trades (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    date_time TEXT NOT NULL,
-                    symbol TEXT NOT NULL,
-                    direction TEXT NOT NULL,
-                    entry_price REAL NOT NULL,
-                    stop_loss REAL NOT NULL,
-                    take_profit REAL NOT NULL,
-                    risk_reward REAL NOT NULL,
-                    potential_gain REAL,
-                    actual_gain REAL,
-                    outcome TEXT,
-                    status TEXT NOT NULL,
-                    entry_reason TEXT,
-                    market_conditions TEXT,
-                    notes TEXT
-                )
-            ''')
-            
-            # Create user_preferences table
-            cursor.execute('''
-                CREATE TABLE IF NOT EXISTS user_preferences (
-                    user_id INTEGER PRIMARY KEY,
-                    account_size REAL NOT NULL,
-                    risk_percentage REAL NOT NULL,
-                    trading_style TEXT NOT NULL,
-                    selected_markets TEXT NOT NULL,
-                    trading_pairs TEXT NOT NULL,
-                    last_updated TEXT NOT NULL
-                )
-            ''')
-            
-            conn.commit()
-            conn.close()
-            
-            logger.info("Database initialized successfully")
-        except Exception as e:
-            logger.error(f"Error creating database: {e}")
+    def _ensure_db_exists(self):
+        """Ensure the database exists and has the required tables"""
+        # Create directory if it doesn't exist
+        self.db_path.parent.mkdir(parents=True, exist_ok=True)
+        
+        # Connect to database
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        
+        # Create trades table
+        cursor.execute('''
+        CREATE TABLE IF NOT EXISTS trades (
+            id TEXT PRIMARY KEY,
+            user_id INTEGER,
+            symbol TEXT,
+            timeframe TEXT,
+            direction TEXT,
+            entry_price REAL,
+            stop_loss REAL,
+            take_profit REAL,
+            risk_percentage REAL,
+            position_size REAL,
+            entry_time TEXT,
+            exit_time TEXT,
+            exit_price REAL,
+            status TEXT,
+            pnl REAL,
+            pnl_percentage REAL,
+            reason TEXT,
+            notes TEXT,
+            created_at TEXT,
+            updated_at TEXT
+        )
+        ''')
+        
+        # Create user preferences table
+        cursor.execute('''
+        CREATE TABLE IF NOT EXISTS user_preferences (
+            user_id INTEGER PRIMARY KEY,
+            account_size REAL,
+            risk_per_trade REAL,
+            max_daily_risk REAL,
+            preferred_markets TEXT,
+            preferred_timeframes TEXT,
+            created_at TEXT,
+            updated_at TEXT
+        )
+        ''')
+        
+        # Create trade statistics table
+        cursor.execute('''
+        CREATE TABLE IF NOT EXISTS trade_statistics (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER,
+            date TEXT,
+            win_count INTEGER,
+            loss_count INTEGER,
+            win_rate REAL,
+            avg_win REAL,
+            avg_loss REAL,
+            profit_factor REAL,
+            total_pnl REAL,
+            total_pnl_percentage REAL,
+            created_at TEXT
+        )
+        ''')
+        
+        conn.commit()
+        conn.close()
+        
+        logger.info(f"Trade journal database initialized at {self.db_path}")
     
-    def add_trade(self, trade_data):
+    def record_trade(self, trade_data):
         """
-        Add a new trade to the journal
+        Record a new trade in the journal
         
         Args:
-            trade_data (dict): Trade data including symbol, direction, entry_price, etc.
-        
+            trade_data (dict): Trade data including symbol, direction, entry, etc.
+            
         Returns:
-            int: ID of the inserted trade, or None if failed
+            str: Trade ID
         """
         try:
+            # Generate a unique ID for the trade
+            trade_id = str(uuid.uuid4())
+            
+            # Set default values
+            now = datetime.now().isoformat()
+            
+            # Prepare trade data
+            trade = {
+                'id': trade_id,
+                'user_id': trade_data.get('user_id', 0),
+                'symbol': trade_data.get('symbol', ''),
+                'timeframe': trade_data.get('timeframe', ''),
+                'direction': trade_data.get('direction', ''),
+                'entry_price': trade_data.get('entry_price', 0.0),
+                'stop_loss': trade_data.get('stop_loss', 0.0),
+                'take_profit': trade_data.get('take_profit', 0.0),
+                'risk_percentage': trade_data.get('risk_percentage', 1.0),
+                'position_size': trade_data.get('position_size', 0.0),
+                'entry_time': trade_data.get('entry_time', now),
+                'exit_time': None,
+                'exit_price': None,
+                'status': 'pending',  # pending, active, closed, cancelled
+                'pnl': 0.0,
+                'pnl_percentage': 0.0,
+                'reason': trade_data.get('reason', ''),
+                'notes': trade_data.get('notes', ''),
+                'created_at': now,
+                'updated_at': now
+            }
+            
+            # Insert into database
             conn = sqlite3.connect(self.db_path)
             cursor = conn.cursor()
             
-            # Ensure required fields are present
-            required_fields = ["symbol", "direction", "entry_price", "stop_loss", "take_profit"]
-            for field in required_fields:
-                if field not in trade_data:
-                    logger.error(f"Missing required field: {field}")
-                    return None
-            
-            # Set default values for optional fields
-            if "date_time" not in trade_data:
-                trade_data["date_time"] = helpers.format_datetime(helpers.get_current_datetime())
-            
-            if "status" not in trade_data:
-                trade_data["status"] = "pending"
-            
-            if "risk_reward" not in trade_data:
-                trade_data["risk_reward"] = helpers.calculate_risk_reward(
-                    trade_data["entry_price"], 
-                    trade_data["stop_loss"], 
-                    trade_data["take_profit"]
-                )
-            
-            # Insert trade into database
             cursor.execute('''
-                INSERT INTO trades (
-                    date_time, symbol, direction, entry_price, stop_loss, take_profit,
-                    risk_reward, potential_gain, status, entry_reason, market_conditions, notes
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO trades (
+                id, user_id, symbol, timeframe, direction, entry_price, stop_loss, take_profit,
+                risk_percentage, position_size, entry_time, exit_time, exit_price, status,
+                pnl, pnl_percentage, reason, notes, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ''', (
-                trade_data.get("date_time", ""),
-                trade_data.get("symbol", ""),
-                trade_data.get("direction", ""),
-                trade_data.get("entry_price", 0),
-                trade_data.get("stop_loss", 0),
-                trade_data.get("take_profit", 0),
-                trade_data.get("risk_reward", 0),
-                trade_data.get("potential_gain", 0),
-                trade_data.get("status", "pending"),
-                trade_data.get("entry_reason", ""),
-                trade_data.get("market_conditions", ""),
-                trade_data.get("notes", "")
+                trade['id'], trade['user_id'], trade['symbol'], trade['timeframe'],
+                trade['direction'], trade['entry_price'], trade['stop_loss'], trade['take_profit'],
+                trade['risk_percentage'], trade['position_size'], trade['entry_time'],
+                trade['exit_time'], trade['exit_price'], trade['status'],
+                trade['pnl'], trade['pnl_percentage'], trade['reason'], trade['notes'],
+                trade['created_at'], trade['updated_at']
             ))
             
-            trade_id = cursor.lastrowid
             conn.commit()
             conn.close()
             
-            logger.info(f"Added trade {trade_id} for {trade_data['symbol']}")
+            logger.info(f"Recorded new trade {trade_id} for {trade['symbol']}")
             return trade_id
             
         except Exception as e:
-            logger.error(f"Error adding trade: {e}")
+            logger.error(f"Error recording trade: {e}")
             return None
     
-    def update_trade_status(self, trade_id, current_price, status=None, notes=None):
+    def update_trade_status(self, trade_id, status, exit_price=None, exit_time=None, notes=None):
         """
-        Update the status of a trade based on current price
+        Update the status of an existing trade
         
         Args:
-            trade_id (int): ID of the trade to update
-            current_price (float): Current price of the symbol
-            status (str, optional): Manual status override
+            trade_id (str): Trade ID
+            status (str): New status (active, closed, cancelled)
+            exit_price (float, optional): Exit price if closed
+            exit_time (str, optional): Exit time if closed
             notes (str, optional): Additional notes
             
         Returns:
-            bool: True if successful, False otherwise
+            bool: Success or failure
         """
         try:
+            # Get current trade data
+            trade = self.get_trade(trade_id)
+            if not trade:
+                logger.error(f"Trade {trade_id} not found")
+                return False
+            
+            # Update trade data
+            now = datetime.now().isoformat()
+            updates = {'status': status, 'updated_at': now}
+            
+            if exit_price is not None:
+                updates['exit_price'] = exit_price
+            
+            if exit_time is not None:
+                updates['exit_time'] = exit_time
+            else:
+                if status == 'closed':
+                    updates['exit_time'] = now
+            
+            if notes is not None:
+                updates['notes'] = notes
+            
+            # Calculate PnL if closed
+            if status == 'closed' and exit_price is not None:
+                entry_price = trade['entry_price']
+                direction = trade['direction']
+                position_size = trade['position_size']
+                
+                if direction == 'BUY':
+                    pnl = (exit_price - entry_price) * position_size
+                else:  # SELL
+                    pnl = (entry_price - exit_price) * position_size
+                
+                # Calculate PnL percentage
+                risk_amount = trade['risk_percentage'] * position_size / 100
+                if risk_amount > 0:
+                    pnl_percentage = (pnl / risk_amount) * 100
+                else:
+                    pnl_percentage = 0
+                
+                updates['pnl'] = pnl
+                updates['pnl_percentage'] = pnl_percentage
+            
+            # Update in database
             conn = sqlite3.connect(self.db_path)
             cursor = conn.cursor()
             
-            # Get trade details
-            cursor.execute("SELECT * FROM trades WHERE id = ?", (trade_id,))
-            trade = cursor.fetchone()
+            # Build the SQL query dynamically
+            set_clause = ', '.join([f"{key} = ?" for key in updates.keys()])
+            values = list(updates.values())
+            values.append(trade_id)
             
-            if not trade:
-                logger.error(f"Trade with ID {trade_id} not found")
-                return False
-            
-            # Convert to dict for easier access
-            columns = [col[0] for col in cursor.description]
-            trade_dict = {columns[i]: trade[i] for i in range(len(columns))}
-            
-            # Calculate outcome if not provided
-            if not status:
-                direction = trade_dict["direction"]
-                entry_price = trade_dict["entry_price"]
-                stop_loss = trade_dict["stop_loss"]
-                take_profit = trade_dict["take_profit"]
-                
-                if direction == "BUY":
-                    if current_price <= stop_loss:
-                        status = "stopped"
-                        actual_gain = (stop_loss - entry_price) / entry_price * 100
-                    elif current_price >= take_profit:
-                        status = "target_reached"
-                        actual_gain = (take_profit - entry_price) / entry_price * 100
-                    else:
-                        status = "open"
-                        actual_gain = (current_price - entry_price) / entry_price * 100
-                else:  # SELL
-                    if current_price >= stop_loss:
-                        status = "stopped"
-                        actual_gain = (entry_price - stop_loss) / entry_price * 100
-                    elif current_price <= take_profit:
-                        status = "target_reached"
-                        actual_gain = (entry_price - take_profit) / entry_price * 100
-                    else:
-                        status = "open"
-                        actual_gain = (entry_price - current_price) / entry_price * 100
-            else:
-                actual_gain = trade_dict.get("actual_gain", 0)
-            
-            # Update trade in database
-            cursor.execute('''
-                UPDATE trades
-                SET status = ?, actual_gain = ?, notes = ?
-                WHERE id = ?
-            ''', (
-                status,
-                actual_gain,
-                notes if notes else trade_dict.get("notes", ""),
-                trade_id
-            ))
+            cursor.execute(f"UPDATE trades SET {set_clause} WHERE id = ?", values)
             
             conn.commit()
             conn.close()
@@ -220,13 +242,46 @@ class TradeJournal:
             logger.error(f"Error updating trade status: {e}")
             return False
     
-    def get_trades(self, limit=10, status=None):
+    def get_trade(self, trade_id):
         """
-        Get recent trades from the journal
+        Get a specific trade by ID
         
         Args:
-            limit (int): Maximum number of trades to return
+            trade_id (str): Trade ID
+            
+        Returns:
+            dict: Trade data or None if not found
+        """
+        try:
+            conn = sqlite3.connect(self.db_path)
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            
+            cursor.execute("SELECT * FROM trades WHERE id = ?", (trade_id,))
+            row = cursor.fetchone()
+            
+            conn.close()
+            
+            if row:
+                return dict(row)
+            else:
+                return None
+                
+        except Exception as e:
+            logger.error(f"Error getting trade: {e}")
+            return None
+    
+    def get_trades(self, user_id=None, status=None, symbol=None, start_date=None, end_date=None, limit=100):
+        """
+        Get trades with optional filtering
+        
+        Args:
+            user_id (int, optional): Filter by user ID
             status (str, optional): Filter by status
+            symbol (str, optional): Filter by symbol
+            start_date (str, optional): Filter by start date
+            end_date (str, optional): Filter by end date
+            limit (int, optional): Limit number of results
             
         Returns:
             list: List of trade dictionaries
@@ -236,457 +291,509 @@ class TradeJournal:
             conn.row_factory = sqlite3.Row
             cursor = conn.cursor()
             
-            query = "SELECT * FROM trades"
+            # Build query
+            query = "SELECT * FROM trades WHERE 1=1"
             params = []
             
-            if status:
-                query += " WHERE status = ?"
+            if user_id is not None:
+                query += " AND user_id = ?"
+                params.append(user_id)
+            
+            if status is not None:
+                query += " AND status = ?"
                 params.append(status)
             
-            query += " ORDER BY date_time DESC LIMIT ?"
+            if symbol is not None:
+                query += " AND symbol = ?"
+                params.append(symbol)
+            
+            if start_date is not None:
+                query += " AND entry_time >= ?"
+                params.append(start_date)
+            
+            if end_date is not None:
+                query += " AND entry_time <= ?"
+                params.append(end_date)
+            
+            query += " ORDER BY entry_time DESC LIMIT ?"
             params.append(limit)
             
             cursor.execute(query, params)
-            trades = [dict(row) for row in cursor.fetchall()]
+            rows = cursor.fetchall()
             
             conn.close()
-            return trades
             
+            return [dict(row) for row in rows]
+                
         except Exception as e:
             logger.error(f"Error getting trades: {e}")
             return []
     
-    def get_pending_trades(self):
-        """Get all pending trades that need status updates"""
-        return self.get_trades(limit=100, status="pending")
-    
-    def get_trade_statistics(self):
+    def get_active_trades(self, user_id=None):
         """
-        Calculate trading statistics
-        
-        Returns:
-            dict: Dictionary with statistics
-        """
-        try:
-            conn = sqlite3.connect(self.db_path)
-            cursor = conn.cursor()
-            
-            # Get total number of trades
-            cursor.execute("SELECT COUNT(*) FROM trades WHERE status != 'pending'")
-            total_trades = cursor.fetchone()[0]
-            
-            if total_trades == 0:
-                return {
-                    "total_trades": 0,
-                    "win_rate": 0,
-                    "average_rr": 0,
-                    "profit_factor": 0,
-                    "total_return": 0,
-                    "best_pair": None,
-                    "worst_pair": None
-                }
-            
-            # Get winning trades
-            cursor.execute("SELECT COUNT(*) FROM trades WHERE status = 'target_reached'")
-            winning_trades = cursor.fetchone()[0]
-            
-            # Calculate win rate
-            win_rate = (winning_trades / total_trades) * 100 if total_trades > 0 else 0
-            
-            # Get average risk-reward ratio
-            cursor.execute("SELECT AVG(risk_reward) FROM trades WHERE status != 'pending'")
-            average_rr = cursor.fetchone()[0] or 0
-            
-            # Calculate total return
-            cursor.execute("SELECT SUM(actual_gain) FROM trades WHERE status != 'pending'")
-            total_return = cursor.fetchone()[0] or 0
-            
-            # Get profit factor (sum of profits / sum of losses)
-            cursor.execute("SELECT SUM(actual_gain) FROM trades WHERE actual_gain > 0")
-            total_profit = cursor.fetchone()[0] or 0
-            
-            cursor.execute("SELECT SUM(ABS(actual_gain)) FROM trades WHERE actual_gain < 0")
-            total_loss = cursor.fetchone()[0] or 0
-            
-            profit_factor = total_profit / total_loss if total_loss > 0 else 0
-            
-            # Get best performing pair
-            cursor.execute("""
-                SELECT symbol, SUM(actual_gain) as total_gain
-                FROM trades
-                WHERE status != 'pending'
-                GROUP BY symbol
-                ORDER BY total_gain DESC
-                LIMIT 1
-            """)
-            best_pair_result = cursor.fetchone()
-            best_pair = {"symbol": best_pair_result[0], "gain": best_pair_result[1]} if best_pair_result else None
-            
-            # Get worst performing pair
-            cursor.execute("""
-                SELECT symbol, SUM(actual_gain) as total_gain
-                FROM trades
-                WHERE status != 'pending'
-                GROUP BY symbol
-                ORDER BY total_gain ASC
-                LIMIT 1
-            """)
-            worst_pair_result = cursor.fetchone()
-            worst_pair = {"symbol": worst_pair_result[0], "gain": worst_pair_result[1]} if worst_pair_result else None
-            
-            conn.close()
-            
-            return {
-                "total_trades": total_trades,
-                "win_rate": win_rate,
-                "average_rr": average_rr,
-                "profit_factor": profit_factor,
-                "total_return": total_return,
-                "best_pair": best_pair,
-                "worst_pair": worst_pair
-            }
-            
-        except Exception as e:
-            logger.error(f"Error calculating statistics: {e}")
-            return {}
-    
-    def save_user_preferences(self, user_id, preferences):
-        """
-        Save user trading preferences
+        Get active trades (pending or active status)
         
         Args:
-            user_id (int): Telegram user ID
-            preferences (dict): User preferences
+            user_id (int, optional): Filter by user ID
             
         Returns:
-            bool: True if successful, False otherwise
+            list: List of active trade dictionaries
+        """
+        return self.get_trades(
+            user_id=user_id,
+            status="active",
+            limit=100
+        ) + self.get_trades(
+            user_id=user_id,
+            status="pending",
+            limit=100
+        )
+    
+    def get_closed_trades(self, user_id=None, start_date=None, end_date=None, limit=100):
+        """
+        Get closed trades
+        
+        Args:
+            user_id (int, optional): Filter by user ID
+            start_date (str, optional): Filter by start date
+            end_date (str, optional): Filter by end date
+            limit (int, optional): Limit number of results
+            
+        Returns:
+            list: List of closed trade dictionaries
+        """
+        return self.get_trades(
+            user_id=user_id,
+            status="closed",
+            start_date=start_date,
+            end_date=end_date,
+            limit=limit
+        )
+    
+    def calculate_performance_metrics(self, user_id=None, start_date=None, end_date=None):
+        """
+        Calculate performance metrics for the trading account
+        
+        Args:
+            user_id (int, optional): Filter by user ID
+            start_date (str, optional): Filter by start date
+            end_date (str, optional): Filter by end date
+            
+        Returns:
+            dict: Performance metrics
         """
         try:
+            # Get closed trades
+            trades = self.get_closed_trades(
+                user_id=user_id,
+                start_date=start_date,
+                end_date=end_date,
+                limit=1000  # Get a large number for accurate metrics
+            )
+            
+            if not trades:
+                return {
+                    'win_count': 0,
+                    'loss_count': 0,
+                    'win_rate': 0,
+                    'avg_win': 0,
+                    'avg_loss': 0,
+                    'profit_factor': 0,
+                    'total_pnl': 0,
+                    'total_pnl_percentage': 0,
+                    'trade_count': 0
+                }
+            
+            # Calculate metrics
+            win_trades = [t for t in trades if t['pnl'] > 0]
+            loss_trades = [t for t in trades if t['pnl'] <= 0]
+            
+            win_count = len(win_trades)
+            loss_count = len(loss_trades)
+            trade_count = len(trades)
+            
+            win_rate = (win_count / trade_count) * 100 if trade_count > 0 else 0
+            
+            avg_win = sum([t['pnl'] for t in win_trades]) / win_count if win_count > 0 else 0
+            avg_loss = sum([t['pnl'] for t in loss_trades]) / loss_count if loss_count > 0 else 0
+            
+            total_profit = sum([t['pnl'] for t in win_trades])
+            total_loss = abs(sum([t['pnl'] for t in loss_trades]))
+            
+            profit_factor = total_profit / total_loss if total_loss > 0 else float('inf')
+            
+            total_pnl = sum([t['pnl'] for t in trades])
+            total_pnl_percentage = sum([t['pnl_percentage'] for t in trades])
+            
+            # Create metrics dictionary
+            metrics = {
+                'win_count': win_count,
+                'loss_count': loss_count,
+                'win_rate': win_rate,
+                'avg_win': avg_win,
+                'avg_loss': avg_loss,
+                'profit_factor': profit_factor,
+                'total_pnl': total_pnl,
+                'total_pnl_percentage': total_pnl_percentage,
+                'trade_count': trade_count
+            }
+            
+            # Save metrics to database
+            self._save_trade_statistics(user_id, metrics)
+            
+            return metrics
+            
+        except Exception as e:
+            logger.error(f"Error calculating performance metrics: {e}")
+            return None
+    
+    def _save_trade_statistics(self, user_id, metrics):
+        """
+        Save trade statistics to database
+        
+        Args:
+            user_id (int): User ID
+            metrics (dict): Performance metrics
+        """
+        try:
+            now = datetime.now()
+            date = now.strftime('%Y-%m-%d')
+            
             conn = sqlite3.connect(self.db_path)
             cursor = conn.cursor()
             
-            # Convert list values to strings for storage
-            if "selected_markets" in preferences and isinstance(preferences["selected_markets"], list):
-                preferences["selected_markets"] = ",".join(preferences["selected_markets"])
-            
-            if "trading_pairs" in preferences and isinstance(preferences["trading_pairs"], list):
-                preferences["trading_pairs"] = ",".join(preferences["trading_pairs"])
-            
-            # Check if user already exists
-            cursor.execute("SELECT user_id FROM user_preferences WHERE user_id = ?", (user_id,))
-            exists = cursor.fetchone() is not None
-            
-            if exists:
-                # Update existing preferences
-                cursor.execute('''
-                    UPDATE user_preferences
-                    SET account_size = ?, risk_percentage = ?, trading_style = ?,
-                        selected_markets = ?, trading_pairs = ?, last_updated = ?
-                    WHERE user_id = ?
-                ''', (
-                    preferences.get("account_size", 0),
-                    preferences.get("risk_percentage", 1.0),
-                    preferences.get("trading_style", ""),
-                    preferences.get("selected_markets", ""),
-                    preferences.get("trading_pairs", ""),
-                    helpers.format_datetime(helpers.get_current_datetime()),
-                    user_id
-                ))
-            else:
-                # Insert new preferences
-                cursor.execute('''
-                    INSERT INTO user_preferences (
-                        user_id, account_size, risk_percentage, trading_style,
-                        selected_markets, trading_pairs, last_updated
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?)
-                ''', (
-                    user_id,
-                    preferences.get("account_size", 0),
-                    preferences.get("risk_percentage", 1.0),
-                    preferences.get("trading_style", ""),
-                    preferences.get("selected_markets", ""),
-                    preferences.get("trading_pairs", ""),
-                    helpers.format_datetime(helpers.get_current_datetime())
-                ))
+            cursor.execute('''
+            INSERT INTO trade_statistics (
+                user_id, date, win_count, loss_count, win_rate, avg_win, avg_loss,
+                profit_factor, total_pnl, total_pnl_percentage, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ''', (
+                user_id, date, metrics['win_count'], metrics['loss_count'],
+                metrics['win_rate'], metrics['avg_win'], metrics['avg_loss'],
+                metrics['profit_factor'], metrics['total_pnl'], metrics['total_pnl_percentage'],
+                now.isoformat()
+            ))
             
             conn.commit()
             conn.close()
             
-            logger.info(f"Saved preferences for user {user_id}")
-            return True
-            
         except Exception as e:
-            logger.error(f"Error saving user preferences: {e}")
-            return False
+            logger.error(f"Error saving trade statistics: {e}")
     
-    def get_user_preferences(self, user_id):
+    def get_performance_history(self, user_id=None, days=30):
         """
-        Get user trading preferences
+        Get performance history for charting
         
         Args:
-            user_id (int): Telegram user ID
+            user_id (int, optional): Filter by user ID
+            days (int, optional): Number of days to include
             
         Returns:
-            dict: User preferences or None if not found
+            dict: Performance history data
         """
         try:
-            conn = sqlite3.connect(self.db_path)
-            conn.row_factory = sqlite3.Row
-            cursor = conn.cursor()
+            # Calculate date range
+            end_date = datetime.now()
+            start_date = end_date - timedelta(days=days)
             
-            cursor.execute("SELECT * FROM user_preferences WHERE user_id = ?", (user_id,))
-            result = cursor.fetchone()
+            # Get trades in date range
+            trades = self.get_closed_trades(
+                user_id=user_id,
+                start_date=start_date.isoformat(),
+                end_date=end_date.isoformat(),
+                limit=1000
+            )
             
-            if not result:
-                return None
+            if not trades:
+                return {
+                    'dates': [],
+                    'pnl': [],
+                    'cumulative_pnl': [],
+                    'win_rate': []
+                }
             
-            preferences = dict(result)
+            # Group trades by date
+            trade_dates = {}
+            for trade in trades:
+                date = trade['exit_time'].split('T')[0]  # Extract date part
+                if date not in trade_dates:
+                    trade_dates[date] = []
+                trade_dates[date].append(trade)
             
-            # Convert string lists back to actual lists
-            if "selected_markets" in preferences and preferences["selected_markets"]:
-                preferences["selected_markets"] = preferences["selected_markets"].split(",")
+            # Calculate daily metrics
+            dates = []
+            daily_pnl = []
+            cumulative_pnl = []
+            win_rates = []
             
-            if "trading_pairs" in preferences and preferences["trading_pairs"]:
-                preferences["trading_pairs"] = preferences["trading_pairs"].split(",")
+            running_pnl = 0
+            running_wins = 0
+            running_trades = 0
             
-            conn.close()
-            return preferences
+            # Generate all dates in range
+            current_date = start_date
+            while current_date <= end_date:
+                date_str = current_date.strftime('%Y-%m-%d')
+                dates.append(date_str)
+                
+                # Get trades for this date
+                day_trades = trade_dates.get(date_str, [])
+                
+                # Calculate daily PnL
+                day_pnl = sum([t['pnl'] for t in day_trades])
+                daily_pnl.append(day_pnl)
+                
+                # Update running totals
+                running_pnl += day_pnl
+                cumulative_pnl.append(running_pnl)
+                
+                # Calculate win rate
+                day_wins = len([t for t in day_trades if t['pnl'] > 0])
+                running_wins += day_wins
+                running_trades += len(day_trades)
+                
+                if running_trades > 0:
+                    win_rate = (running_wins / running_trades) * 100
+                else:
+                    win_rate = 0
+                
+                win_rates.append(win_rate)
+                
+                # Move to next day
+                current_date += timedelta(days=1)
+            
+            return {
+                'dates': dates,
+                'pnl': daily_pnl,
+                'cumulative_pnl': cumulative_pnl,
+                'win_rate': win_rates
+            }
             
         except Exception as e:
-            logger.error(f"Error getting user preferences: {e}")
+            logger.error(f"Error getting performance history: {e}")
             return None
     
-    def update_pending_trades(self):
+    def check_pending_trades(self):
         """
-        Update all pending trades at end of day
+        Check pending trades to see if they should be activated or cancelled
         
         Returns:
-            int: Number of trades updated
+            dict: Summary of updates
         """
         try:
             # Get all pending trades
-            pending_trades = self.get_pending_trades()
+            pending_trades = self.get_trades(status="pending")
             
             if not pending_trades:
-                logger.info("No pending trades to update")
-                return 0
+                return {'activated': 0, 'cancelled': 0, 'total': 0}
             
-            updated_count = 0
+            # Initialize counters
+            activated = 0
+            cancelled = 0
             
-            # Update each trade
+            # Current time
+            now = datetime.now()
+            
+            # Process each pending trade
             for trade in pending_trades:
-                # Here you would get the current price from your data provider
-                # For now, we'll use a dummy value
-                current_price = trade["entry_price"]  # Placeholder
+                trade_id = trade['id']
+                symbol = trade['symbol']
+                direction = trade['direction']
+                entry_price = trade['entry_price']
                 
-                # Update trade status
-                success = self.update_trade_status(
-                    trade["id"],
-                    current_price,
-                    notes="Automatically updated at end of day"
-                )
+                # Check if trade is too old (more than 24 hours)
+                entry_time = datetime.fromisoformat(trade['entry_time'])
+                if (now - entry_time).total_seconds() > 24 * 60 * 60:
+                    # Cancel trade
+                    self.update_trade_status(
+                        trade_id,
+                        'cancelled',
+                        notes='Cancelled due to timeout (24 hours)'
+                    )
+                    cancelled += 1
+                    continue
                 
-                if success:
-                    updated_count += 1
-            
-            logger.info(f"Updated {updated_count} pending trades")
-            return updated_count
-            
-        except Exception as e:
-            logger.error(f"Error updating pending trades: {e}")
-            return 0
-
-    # Add to trading_bot/journal/trade_journal.py
-
-    def get_active_trades(self, user_id=None):
-        """
-        Get active trades (pending or open)
-        
-        Args:
-            user_id (int, optional): Filter by user ID
-            
-        Returns:
-            list: List of active trades
-        """
-        try:
-            conn = sqlite3.connect(self.db_path)
-            conn.row_factory = sqlite3.Row
-            cursor = conn.cursor()
-            
-            query = "SELECT * FROM trades WHERE status IN ('pending', 'open')"
-            params = []
-            
-            if user_id is not None:
-                # If the trades table has a user_id column
-                if self._has_column('trades', 'user_id'):
-                    query += " AND user_id = ?"
-                    params.append(user_id)
-            
-            cursor.execute(query, params)
-            trades = [dict(row) for row in cursor.fetchall()]
-            
-            conn.close()
-            return trades
-            
-        except Exception as e:
-            logger.error(f"Error getting active trades: {e}")
-            return []
-        
-    def get_recent_trades(self, user_id=None, limit=10):
-        """
-        Get recent trades regardless of status
-        
-        Args:
-            user_id (int, optional): Filter by user ID
-            limit (int): Maximum number of trades to return
-            
-        Returns:
-            list: List of recent trades
-        """
-        try:
-            conn = sqlite3.connect(self.db_path)
-            conn.row_factory = sqlite3.Row
-            cursor = conn.cursor()
-            
-            query = "SELECT * FROM trades"
-            params = []
-            
-            if user_id is not None:
-                # If the trades table has a user_id column
-                if self._has_column('trades', 'user_id'):
-                    query += " WHERE user_id = ?"
-                    params.append(user_id)
-            
-            query += " ORDER BY date_time DESC LIMIT ?"
-            params.append(limit)
-            
-            cursor.execute(query, params)
-            trades = [dict(row) for row in cursor.fetchall()]
-            
-            conn.close()
-            return trades
-            
-        except Exception as e:
-            logger.error(f"Error getting recent trades: {e}")
-            return []
-
-
-    def get_account_statistics(self, user_id=None):
-        """
-        Get account statistics
-        
-        Args:
-            user_id (int, optional): User ID for filtering trades
-            
-        Returns:
-            dict: Account statistics
-        """
-        try:
-            conn = sqlite3.connect(self.db_path)
-            cursor = conn.cursor()
-            
-            # Base query parts
-            where_clause = ""
-            params = []
-            
-            # Add user_id filter if provided and column exists
-            if user_id is not None and self._has_column('trades', 'user_id'):
-                where_clause = " WHERE user_id = ?"
-                params.append(user_id)
-            
-            # Get total completed trades
-            completed_query = "SELECT COUNT(*) FROM trades"
-            if where_clause:
-                completed_query += where_clause + " AND status != 'pending'"
-            else:
-                completed_query += " WHERE status != 'pending'"
-            
-            cursor.execute(completed_query, params)
-            total_trades = cursor.fetchone()[0]
-            
-            # Get winning trades
-            winning_query = "SELECT COUNT(*) FROM trades"
-            if where_clause:
-                winning_query += where_clause + " AND status = 'target_reached'"
-            else:
-                winning_query += " WHERE status = 'target_reached'"
-            
-            cursor.execute(winning_query, params)
-            winning_trades = cursor.fetchone()[0]
-            
-            # Get total profit/loss
-            profit_query = "SELECT SUM(actual_gain) FROM trades"
-            if where_clause:
-                profit_query += where_clause + " AND status != 'pending'"
-            else:
-                profit_query += " WHERE status != 'pending'"
-            
-            cursor.execute(profit_query, params)
-            total_profit_loss = cursor.fetchone()[0] or 0
-            
-            # Calculate win rate
-            win_rate = (winning_trades / total_trades * 100) if total_trades > 0 else 0
-            
-            # Get user preferences for account size
-            account_size = 10000  # Default
-            if user_id is not None:
-                prefs = self.get_user_preferences(user_id)
-                if prefs:
-                    account_size = prefs.get('account_size', 10000)
-            
-            # Calculate current drawdown (simplified)
-            current_drawdown = 0
-            if total_profit_loss < 0:
-                current_drawdown = abs(total_profit_loss) / account_size * 100
-            
-            conn.close()
-            
+                # TODO: Check current price to see if trade should be activated
+                # This requires integration with your data provider
+                # For now, we'll just leave trades pending
+                
             return {
-                'total_trades': total_trades,
-                'winning_trades': winning_trades,
-                'losing_trades': total_trades - winning_trades,
-                'win_rate': win_rate,
-                'total_profit_loss': total_profit_loss,
-                'account_size': account_size,
-                'current_drawdown': current_drawdown
+                'activated': activated,
+                'cancelled': cancelled,
+                'total': len(pending_trades)
             }
             
         except Exception as e:
-            logger.error(f"Error getting account statistics: {e}")
-            return {
-                'total_trades': 0,
-                'winning_trades': 0,
-                'losing_trades': 0,
-                'win_rate': 0,
-                'total_profit_loss': 0,
-                'account_size': account_size,
-                'current_drawdown': 0
-            }
-
-
-    def _has_column(self, table, column):
+            logger.error(f"Error checking pending trades: {e}")
+            return None
+    
+    def update_active_trades(self, data_processor):
         """
-        Check if a table has a specific column
+        Update active trades with current prices
         
         Args:
-            table (str): Table name
-            column (str): Column name
+            data_processor: Data processor instance for getting current prices
             
         Returns:
-            bool: True if column exists, False otherwise
+            dict: Summary of updates
         """
         try:
-            conn = sqlite3.connect(self.db_path)
-            cursor = conn.cursor()
+            # Get all active trades
+            active_trades = self.get_trades(status="active")
             
-            # Get table info
-            cursor.execute(f"PRAGMA table_info({table})")
-            columns = [info[1] for info in cursor.fetchall()]
+            if not active_trades:
+                return {'closed': 0, 'updated': 0, 'total': 0}
             
-            conn.close()
+            # Initialize counters
+            closed = 0
+            updated = 0
             
-            return column in columns
+            # Process each active trade
+            for trade in active_trades:
+                trade_id = trade['id']
+                symbol = trade['symbol']
+                direction = trade['direction']
+                entry_price = trade['entry_price']
+                stop_loss = trade['stop_loss']
+                take_profit = trade['take_profit']
+                
+                # Get current price
+                current_price = data_processor.get_latest_price(symbol)
+                
+                if current_price is None:
+                    logger.warning(f"Could not get current price for {symbol}")
+                    continue
+                
+                # Check if stop loss or take profit hit
+                if direction == 'BUY':
+                    if current_price <= stop_loss:
+                        # Stop loss hit
+                        self.update_trade_status(
+                            trade_id,
+                            'closed',
+                            exit_price=stop_loss,
+                            notes='Closed at stop loss'
+                        )
+                        closed += 1
+                    elif current_price >= take_profit:
+                        # Take profit hit
+                        self.update_trade_status(
+                            trade_id,
+                            'closed',
+                            exit_price=take_profit,
+                            notes='Closed at take profit'
+                        )
+                        closed += 1
+                    else:
+                        # Still active
+                        updated += 1
+                else:  # SELL
+                    if current_price >= stop_loss:
+                        # Stop loss hit
+                        self.update_trade_status(
+                            trade_id,
+                            'closed',
+                            exit_price=stop_loss,
+                            notes='Closed at stop loss'
+                        )
+                        closed += 1
+                    elif current_price <= take_profit:
+                        # Take profit hit
+                        self.update_trade_status(
+                            trade_id,
+                            'closed',
+                            exit_price=take_profit,
+                            notes='Closed at take profit'
+                        )
+                        closed += 1
+                    else:
+                        # Still active
+                        updated += 1
+            
+            return {
+                'closed': closed,
+                'updated': updated,
+                'total': len(active_trades)
+            }
             
         except Exception as e:
-            logger.error(f"Error checking column existence: {e}")
-            return False
+            logger.error(f"Error updating active trades: {e}")
+            return None
+    
+    def export_trades_to_csv(self, filepath=None, user_id=None):
+        """
+        Export trades to CSV file
+        
+        Args:
+            filepath (str, optional): Path to save CSV file
+            user_id (int, optional): Filter by user ID
+            
+        Returns:
+            str: Path to CSV file
+        """
+        try:
+            # Get all trades
+            trades = self.get_trades(user_id=user_id, limit=1000)
+            
+            if not trades:
+                logger.warning("No trades to export")
+                return None
+            
+            # Convert to DataFrame
+            df = pd.DataFrame(trades)
+            
+            # Generate filepath if not provided
+            if filepath is None:
+                now = datetime.now().strftime('%Y%m%d_%H%M%S')
+                filepath = f"data/exports/trades_{now}.csv"
+            
+            # Ensure directory exists
+            os.makedirs(os.path.dirname(filepath), exist_ok=True)
+            
+            # Export to CSV
+            df.to_csv(filepath, index=False)
+            
+            logger.info(f"Exported {len(trades)} trades to {filepath}")
+            return filepath
+            
+        except Exception as e:
+            logger.error(f"Error exporting trades to CSV: {e}")
+            return None
+    
+    def export_trades_to_json(self, filepath=None, user_id=None):
+        """
+        Export trades to JSON file
+        
+        Args:
+            filepath (str, optional): Path to save JSON file
+            user_id (int, optional): Filter by user ID
+            
+        Returns:
+            str: Path to JSON file
+        """
+        try:
+            # Get all trades
+            trades = self.get_trades(user_id=user_id, limit=1000)
+            
+            if not trades:
+                logger.warning("No trades to export")
+                return None
+            
+            # Generate filepath if not provided
+            if filepath is None:
+                now = datetime.now().strftime('%Y%m%d_%H%M%S')
+                filepath = f"data/exports/trades_{now}.json"
+            
+            # Ensure directory exists
+            os.makedirs(os.path.dirname(filepath), exist_ok=True)
+            
+            # Export to JSON
+            with open(filepath, 'w') as f:
+                json.dump(trades, f, indent=2)
+            
+            logger.info(f"Exported {len(trades)} trades to {filepath}")
+            return filepath
+            
+        except Exception as e:
+            logger.error(f"Error exporting trades to JSON: {e}")
+            return None

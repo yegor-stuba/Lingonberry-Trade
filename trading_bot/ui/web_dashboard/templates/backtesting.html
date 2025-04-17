@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Backtesting - Trading Bot Dashboard</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/styles.css') }}">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+<body>
+    <div class="app-container">
+        <div class="sidebar">
+            <div class="sidebar-header">
+                <h2>Lingonberry Trade</h2>
+            </div>
+            <nav class="sidebar-nav">
+                <a href="/" class="nav-item">
+                    <span class="nav-icon">📊</span>
+                    <span class="nav-text">Dashboard</span>
+                </a>
+                <a href="/performance" class="nav-item">
+                    <span class="nav-icon">📈</span>
+                    <span class="nav-text">Performance</span>
+                </a>
+                <a href="/backtesting" class="nav-item active">
+                    <span class="nav-icon">🧪</span>
+                    <span class="nav-text">Backtesting</span>
+                </a>
+            </nav>
+        </div>
+        
+        <div class="main-content">
+            <header class="main-header">
+                <h1>Backtesting</h1>
+            </header>
+            
+            <div class="backtesting-grid">
+                <div class="card">
+                    <div class="card-header">
+                        <h3>Backtest Configuration</h3>
+                    </div>
+                    <div class="card-body">
+                        <form id="backtest-form">
+                            <div class="form-group">
+                                <label for="symbol">Symbol</label>
+                                <select id="symbol" name="symbol" required>
+                                    <option value="">Select Symbol</option>
+                                    <!-- Symbols will be loaded here -->
+                                </select>
+                            </div>
+                            
+                            <div class="form-group">
+                                <label for="timeframe">Timeframe</label>
+                                <select id="timeframe" name="timeframe" required>
+                                    <option value="1m">1 Minute</option>
+                                    <option value="5m">5 Minutes</option>
+                                    <option value="15m">15 Minutes</option>
+                                    <option value="30m">30 Minutes</option>
+                                    <option value="1h" selected>1 Hour</option>
+                                    <option value="4h">4 Hours</option>
+                                    <option value="1d">1 Day</option>
+                                </select>
+                            </div>
+                            
+                            <div class="form-group">
+                                <label for="start-date">Start Date</label>
+                                <input type="date" id="start-date" name="start_date" required>
+                            </div>
+                            
+                            <div class="form-group">
+                                <label for="end-date">End Date</label>
+                                <input type="date" id="end-date" name="end_date" required>
+                            </div>
+                            
+                            <div class="form-group">
+                                <label for="strategy">Strategy</label>
+                                <select id="strategy" name="strategy" required>
+                                    <option value="smc">Smart Money Concepts</option>
+                                    <option value="ict">Inner Circle Trader</option>
+                                    <option value="combined">Combined Strategy</option>
+                                </select>
+                            </div>
+                            
+                            <div class="form-group">
+                                <label for="risk-per-trade">Risk Per Trade (%)</label>
+                                <input type="number" id="risk-per-trade" name="risk_per_trade" min="0.1" max="10" step="0.1" value="1">
+                            </div>
+                            
+                            <div class="form-group">
+                                <button type="submit" class="btn btn-primary">Run Backtest</button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+                
+                <div class="card" id="backtest-results"">
+                    <div class="card-header">
+                        <h3>Backtest Results</h3>
+                    </div>
+                    <div class="card-body">
+                        <div class="metrics-grid">
+                            <div class="metric">
+                                <span class="metric-value" id="backtest-win-rate">0%</span>
+                                <span class="metric-label">Win Rate</span>
+                            </div>
+                            <div class="metric">
+                                <span class="metric-value" id="backtest-profit-factor">0</span>
+                                <span class="metric-label">Profit Factor</span>
+                            </div>
+                            <div class="metric">
+                                <span class="metric-value" id="backtest-total-trades">0</span>
+                                <span class="metric-label">Total Trades</span>
+                            </div>
+                            <div class="metric">
+                                <span class="metric-value" id="backtest-total-pnl">$0</span>
+                                <span class="metric-label">Total P&L</span>
+                            </div>
+                        </div>
+                        
+                        <div class="chart-container">
+                            <canvas id="backtest-equity-chart"></canvas>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="card" id="backtest-trades">
+                    <div class="card-header">
+                        <h3>Backtest Trades</h3>
+                    </div>
+                    <div class="card-body">
+                        <div class="table-container">
+                            <table id="backtest-trades-table">
+                                <thead>
+                                    <tr>
+                                        <th>Date</th>
+                                        <th>Symbol</th>
+                                        <th>Direction</th>
+                                        <th>Entry</th>
+                                        <th>Exit</th>
+                                        <th>P&L</th>
+                                        <th>Status</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    <!-- Backtest trades will be loaded here -->
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <script src="{{ url_for('static', filename='js/backtesting.js') }}"></script>
+</body>
+</html>

@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width">
+    <title>Lingonberry Trade</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/telegram_mini_app.css') }}">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+</head>
+<body>
+    <div class="tg-app-container">
+        <div class="tg-tabs">
+            <div class="tg-tab active" data-tab="performance">Performance</div>
+            <div class="tg-tab" data-tab="journal">Journal</div>
+            <div class="tg-tab" data-tab="backtest">Backtest</div>
+        </div>
+        
+        <div class="tg-tab-content active" id="performance-tab">
+            <div class="tg-card">
+                <div class="tg-card-header">
+                    <h3>Performance Summary</h3>
+                </div>
+                <div class="tg-card-body">
+                    <div class="tg-metrics-grid">
+                        <div class="tg-metric">
+                            <span class="tg-metric-value" id="tg-win-rate">0%</span>
+                            <span class="tg-metric-label">Win Rate</span>
+                        </div>
+                        <div class="tg-metric">
+                            <span class="tg-metric-value" id="tg-profit-factor">0</span>
+                            <span class="tg-metric-label">Profit Factor</span>
+                        </div>
+                        <div class="tg-metric">
+                            <span class="tg-metric-value" id="tg-total-trades">0</span>
+                            <span class="tg-metric-label">Total Trades</span>
+                        </div>
+                        <div class="tg-metric">
+                            <span class="tg-metric-value" id="tg-total-pnl">$0</span>
+                            <span class="tg-metric-label">Total P&L</span>
+                        </div>
+                    </div>
+                    
+                    <div class="tg-chart-container">
+                        <canvas id="tg-equity-chart"></canvas>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <div class="tg-tab-content" id="journal-tab">
+            <div class="tg-card">
+                <div class="tg-card-header">
+                    <h3>Trade Journal</h3>
+                </div>
+                <div class="tg-card-body">
+                    <div class="tg-table-container">
+                        <table id="tg-trade-journal-table">
+                            <thead>
+                                <tr>
+                                    <th>Date</th>
+                                    <th>Symbol</th>
+                                    <th>Dir</th>
+                                    <th>P&L</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <!-- Trades will be loaded here -->
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <div class="tg-tab-content" id="backtest-tab">
+            <div class="tg-card">
+                <div class="tg-card-header">
+                    <h3>Quick Backtest</h3>
+                </div>
+                <div class="tg-card-body">
+                    <form id="tg-backtest-form">
+                        <div class="tg-form-group">
+                            <label for="tg-symbol">Symbol</label>
+                            <select id="tg-symbol" name="symbol" required>
+                                <option value="">Select Symbol</option>
+                                <!-- Symbols will be loaded here -->
+                            </select>
+                        </div>
+                        
+                        <div class="tg-form-group">
+                            <label for="tg-timeframe">Timeframe</label>
+                            <select id="tg-timeframe" name="timeframe" required>
+                                <option value="1h" selected>1 Hour</option>
+                                <option value="4h">4 Hours</option>
+                                <option value="1d">1 Day</option>
+                            </select>
+                        </div>
+                        
+                        <div class="tg-form-group">
+                            <label for="tg-period">Period</label>
+                            <select id="tg-period" name="period" required>
+                                <option value="30">Last 30 days</option>
+                                <option value="90">Last 90 days</option>
+                                <option value="180">Last 6 months</option>
+                            </select>
+                        </div>
+                        
+                        <div class="tg-form-group">
+                            <button type="submit" class="tg-btn tg-btn-primary">Run Backtest</button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <script src="{{ url_for('static', filename='js/telegram_mini_app.js') }}"></script>
+</body>
+</html>
