@@ -51,25 +51,31 @@ class TradeJournal:
             if 'id' not in trade_data:
                 from uuid import uuid4
                 trade_data['id'] = str(uuid4())
-            
+                
             # Set user ID if provided
             if user_id and 'user_id' not in trade_data:
                 trade_data['user_id'] = user_id
-            
+                
             # Calculate position size if not provided
             if 'position_size' not in trade_data and 'user_id' in trade_data:
-                position_info = self.calculate_position_size(
-                    user_id=trade_data['user_id'],
-                    symbol=trade_data['symbol'],
-                    entry_price=trade_data['entry_price'],
-                    stop_loss=trade_data['stop_loss']
-                )
+                try:
+                    position_info = self.calculate_position_size(
+                        user_id=trade_data['user_id'],
+                        symbol=trade_data['symbol'],
+                        entry_price=trade_data['entry_price'],
+                        stop_loss=trade_data['stop_loss']
+                    )
+                    trade_data['position_size'] = position_info.get('position_size', 0)
+                    trade_data['risk_amount'] = position_info.get('risk_amount', 0)
+                except Exception as e:
+                    logger.warning(f"Error calculating position size: {e}. Using defaults.")
+                    trade_data['position_size'] = 0.01  # Default position size
+                    trade_data['risk_amount'] = 0      # Default risk amount
                 
-                trade_data['position_size'] = position_info.get('position_size', 0)
-                trade_data['risk_amount'] = position_info.get('risk_amount', 0)
-            
             # Set default values for missing fields
             now = datetime.now().isoformat()
+            
+            # Basic trade properties
             trade_data.setdefault('status', 'pending')
             trade_data.setdefault('entry_time', now)
             trade_data.setdefault('outcome', None)
@@ -79,18 +85,41 @@ class TradeJournal:
             trade_data.setdefault('profit_loss_pips', 0)
             trade_data.setdefault('created_at', now)
             trade_data.setdefault('updated_at', now)
+            
+            # User and trade details
             trade_data.setdefault('user_id', 0)
             trade_data.setdefault('symbol', '')
             trade_data.setdefault('timeframe', '')
             trade_data.setdefault('direction', '')
+            
+            # Price levels
             trade_data.setdefault('entry_price', 0.0)
             trade_data.setdefault('stop_loss', 0.0)
             trade_data.setdefault('take_profit', 0.0)
+            
+            # Risk and performance metrics
             trade_data.setdefault('risk_percentage', 1.0)
             trade_data.setdefault('pnl', 0.0)
             trade_data.setdefault('pnl_percentage', 0.0)
+            
+            # Notes and analysis
             trade_data.setdefault('reason', '')
             trade_data.setdefault('notes', '')
+            
+            # Calculate risk-reward ratio if not provided
+            if 'risk_reward' not in trade_data and trade_data['entry_price'] > 0 and trade_data['stop_loss'] > 0 and trade_data['take_profit'] > 0:
+                try:
+                    if trade_data['direction'] == 'BUY':
+                        risk = abs(trade_data['entry_price'] - trade_data['stop_loss'])
+                        reward = abs(trade_data['take_profit'] - trade_data['entry_price'])
+                    else:  # SELL
+                        risk = abs(trade_data['stop_loss'] - trade_data['entry_price'])
+                        reward = abs(trade_data['entry_price'] - trade_data['take_profit'])
+                    
+                    trade_data['risk_reward'] = reward / risk if risk > 0 else 0
+                except Exception as e:
+                    logger.warning(f"Error calculating risk-reward ratio: {e}. Using default.")
+                    trade_data['risk_reward'] = 0
             
             # Insert into database
             conn = sqlite3.connect(self.db_path)
@@ -108,18 +137,18 @@ class TradeJournal:
             columns_str = ', '.join(filtered_data.keys())
             values = list(filtered_data.values())
             
+            # Execute the insert
             cursor.execute(f"INSERT INTO trades ({columns_str}) VALUES ({placeholders})", values)
-            
             conn.commit()
             conn.close()
             
             logger.info(f"Recorded new trade: {trade_data['id']} - {trade_data['symbol']} {trade_data['direction']}")
-            
             return trade_data['id']
             
         except Exception as e:
-            logger.error(f"Error recording trade: {e}")
+            logger.error(f"Error recording trade: {e}", exc_info=True)
             return None
+
 
     def update_trade_status(self, trade_id, status, exit_price=None, exit_time=None, notes=None):
         """

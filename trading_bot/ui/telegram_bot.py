@@ -87,6 +87,9 @@ class TelegramBot:
         
         # Log the dashboard URL being used
         logger.info(f"Telegram bot using dashboard URL: {self.dashboard_url}")
+        # Set journal URL
+        self.journal_url = f"{self.dashboard_url}/telegram_journal?ngrok-skip-browser-warning=true"
+        logger.info(f"Using journal URL: {self.journal_url}")
         
         # Register handlers
         self.register_handlers()
@@ -282,10 +285,14 @@ class TelegramBot:
         timeframe = context.args[1].upper() if len(context.args) > 1 else self.default_timeframe
         
         # Send "analyzing" message
-        message = await update.message.reply_text(f"Analyzing {symbol} on {timeframe} timeframe... ⏳")
+        message = await update.message.reply_text(f"Analyzing {symbol} on {timeframe} timeframe with HTF context... ⏳")
         
-        # Perform analysis
-        await self.perform_analysis(update, context, symbol, timeframe, message)
+        # Determine HTF and LTF timeframes
+        timeframes = self._get_multi_timeframe_list(timeframe)
+        
+        # Perform HTF analysis
+        await self.perform_htf_analysis(update, context, symbol, timeframes, message)
+
     
     async def journal_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle the /journal command"""
@@ -536,7 +543,6 @@ class TelegramBot:
     async def handle_trade_decision(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle user decision on a trade setup"""
         query = update.callback_query
-        await query.answer()
         
         # Get trade data from callback data
         callback_data = query.data
@@ -547,56 +553,65 @@ class TelegramBot:
         trade_data = context.user_data.get("current_trade_setup")
         
         if not trade_data:
-            await query.edit_message_text("Error: No trade setup found.")
+            logger.error("No trade setup found in user_data")
+            await query.answer("Error: No trade setup found.")
             return
         
         if action == "accept":
             # Get user ID
             user_id = update.effective_user.id
             
-            # Record the trade with user ID
-            trade_id = self.trade_journal.record_trade(trade_data, user_id=user_id)
-            
-            # Create keyboard with journal button
-            keyboard = [
-                [InlineKeyboardButton("View Journal Summary", callback_data="journal")]
-            ]
-            
-            # Add web app button only if we have a valid URL
-            journal_url = f"{self.dashboard_url}/telegram_journal"
-            if self.dashboard_url.endswith('/'):
-                journal_url = f"{self.dashboard_url[:-1]}/telegram_journal"
-            
-            if not "localhost" in self.dashboard_url and not "127.0.0.1" in self.dashboard_url:
-                keyboard[0].append(
-                    InlineKeyboardButton("Open Journal 📊", web_app=WebAppInfo(url=journal_url))
-                )
-            
-            reply_markup = InlineKeyboardMarkup(keyboard)
-            
-            # Send confirmation with buttons
-            await query.edit_message_text(
-                f"✅ Trade accepted and recorded!\n\n"
-                f"Symbol: {trade_data['symbol']}\n"
-                f"Direction: {trade_data['direction']}\n"
-                f"Entry: {trade_data['entry_price']}\n"
-                f"Stop Loss: {trade_data['stop_loss']}\n"
-                f"Take Profit: {trade_data['take_profit']}\n"
-                f"Risk/Reward: {trade_data['risk_reward']:.2f}\n\n"
-                f"Trade ID: {trade_id}\n\n"
-                f"The trade has been added to your journal and will be monitored.",
-                reply_markup=reply_markup
-            )
+            try:
+                # Record the trade with user ID
+                trade_id = self.trade_journal.record_trade(trade_data, user_id=user_id)
                 
+                # Create keyboard with journal button
+                keyboard = [
+                    [InlineKeyboardButton("View Journal Summary", callback_data="journal")]
+                ]
+                
+                # Add web app button only if we have a valid URL
+                if self.dashboard_url and not "localhost" in self.dashboard_url and not "127.0.0.1" in self.dashboard_url:
+                    journal_url = f"{self.dashboard_url}/telegram_journal?ngrok-skip-browser-warning=true"
+                    keyboard[0].append(
+                        InlineKeyboardButton("Open Journal 📊", web_app=WebAppInfo(url=journal_url))
+                    )
+                
+                reply_markup = InlineKeyboardMarkup(keyboard)
+                
+                # Send a new message instead of editing the current one
+                await query.message.reply_text(
+                    f"✅ Trade accepted and recorded!\n\n"
+                    f"Symbol: {trade_data['symbol']}\n"
+                    f"Direction: {trade_data['direction']}\n"
+                    f"Entry: {trade_data['entry_price']}\n"
+                    f"Stop Loss: {trade_data['stop_loss']}\n"
+                    f"Take Profit: {trade_data['take_profit']}\n"
+                    f"Risk/Reward: {trade_data['risk_reward']:.2f}\n\n"
+                    f"Trade ID: {trade_id}\n\n"
+                    f"The trade has been added to your journal and will be monitored.",
+                    reply_markup=reply_markup
+                )
+                
+                # Just answer the callback query without editing the message
+                await query.answer("Trade recorded successfully!")
+                
+            except Exception as e:
+                logger.error(f"Error recording trade: {e}", exc_info=True)
+                # Send a new message with the error
+                await query.message.reply_text(f"❌ Error recording trade: {str(e)}\n\nPlease try again later.")
+                await query.answer("Error recording trade")
+                    
         elif action == "reject":
-            # Just acknowledge rejection
-            await query.edit_message_text(
+            # Send a new message instead of editing
+            await query.message.reply_text(
                 f"❌ Trade rejected.\n\n"
                 f"Symbol: {trade_data['symbol']}\n"
                 f"Direction: {trade_data['direction']}\n\n"
                 f"The trade has not been recorded."
             )
-            
+            await query.answer("Trade rejected")
+                
         elif action == "modify":
             # Show modification options
             keyboard = [
@@ -612,30 +627,52 @@ class TelegramBot:
             
             reply_markup = InlineKeyboardMarkup(keyboard)
             
-            await query.edit_message_text(
-                f"🔧 Modify Trade Setup\n\n"
-                f"Symbol: {trade_data['symbol']}\n"
-                f"Direction: {trade_data['direction']}\n"
-                f"Entry: {trade_data['entry_price']}\n"
-                f"Stop Loss: {trade_data['stop_loss']}\n"
-                f"Take Profit: {trade_data['take_profit']}\n"
-                f"Risk/Reward: {trade_data['risk_reward']:.2f}\n\n"
-                f"What would you like to modify?",
-                reply_markup=reply_markup
-            )
+            try:
+                # Try to edit the message if it has text
+                if hasattr(query.message, 'text') and query.message.text:
+                    await query.edit_message_text(
+                        f"🔧 Modify Trade Setup\n\n"
+                        f"Symbol: {trade_data['symbol']}\n"
+                        f"Direction: {trade_data['direction']}\n"
+                        f"Entry: {trade_data['entry_price']}\n"
+                        f"Stop Loss: {trade_data['stop_loss']}\n"
+                        f"Take Profit: {trade_data['take_profit']}\n"
+                        f"Risk/Reward: {trade_data['risk_reward']:.2f}\n\n"
+                        f"What would you like to modify?",
+                        reply_markup=reply_markup
+                    )
+                else:
+                    # If the message has no text (e.g., it's a photo), send a new message
+                    await query.message.reply_text(
+                        f"🔧 Modify Trade Setup\n\n"
+                        f"Symbol: {trade_data['symbol']}\n"
+                        f"Direction: {trade_data['direction']}\n"
+                        f"Entry: {trade_data['entry_price']}\n"
+                        f"Stop Loss: {trade_data['stop_loss']}\n"
+                        f"Take Profit: {trade_data['take_profit']}\n"
+                        f"Risk/Reward: {trade_data['risk_reward']:.2f}\n\n"
+                        f"What would you like to modify?",
+                        reply_markup=reply_markup
+                    )
+                    await query.answer("Modify trade options")
+            except Exception as e:
+                logger.error(f"Error showing modify options: {e}", exc_info=True)
+                await query.message.reply_text(f"Error showing modify options: {str(e)}")
+                await query.answer("Error showing modify options")
         
         # Clear the current trade setup
         if action != "modify":
             context.user_data.pop("current_trade_setup", None)
 
+
     async def perform_analysis(
-        self, 
-        update: Update, 
-        context: ContextTypes.DEFAULT_TYPE,
-        symbol: str, 
-        timeframe: str, 
-        message: Message
-    ):
+    self, 
+    update: Update, 
+    context: ContextTypes.DEFAULT_TYPE,
+    symbol: str, 
+    timeframe: str, 
+    message: Message
+):
         """Perform analysis on a symbol and timeframe"""
         try:
             # Determine data source based on symbol
@@ -644,30 +681,11 @@ class TelegramBot:
             else:
                 source = 'crypto'
                 
-            # Get data with fallback options
-            df = None
-            error_message = None
-            
-            try:
-                # Try primary source first
-                df = await self.data_processor.get_data(symbol, timeframe, bars=self.default_bars, source=source)
-            except Exception as e:
-                error_message = f"Error fetching data from {source}: {str(e)}"
-                logger.warning(error_message)
-            
-            # If primary source failed, try CSV
-            if df is None or df.empty:
-                if error_message:
-                    logger.info(f"Attempting to load data from CSV as fallback for {symbol} {timeframe}")
-                try:
-                    df = await self.data_processor.get_data(symbol, timeframe, bars=self.default_bars, source='csv')
-                    if df is not None and not df.empty:
-                        logger.info(f"Successfully loaded {len(df)} rows from CSV for {symbol} {timeframe}")
-                except Exception as csv_error:
-                    logger.error(f"CSV fallback also failed: {str(csv_error)}")
+            # Get data
+            df = await self.data_processor.get_data(symbol, timeframe, bars=self.default_bars, source=source)
             
             if df is None or df.empty:
-                await message.edit_text(f"❌ Error: No data available for {symbol} on {timeframe} timeframe. Please try another symbol or timeframe.")
+                await message.edit_text(f"❌ Error: No data available for {symbol} on {timeframe} timeframe.")
                 return
                     
             # Generate signals
@@ -698,29 +716,220 @@ class TelegramBot:
                 # Sort signals by risk-reward ratio (descending)
                 sorted_signals = sorted(filtered_signals, key=lambda x: x.get('risk_reward', 0), reverse=True)
                 
-                # Take top 3 signals
-                top_signals = sorted_signals[:3]
+                # Take top 2 signals
+                top_signals = sorted_signals[:2]
+                
+                # Add current price to signals if missing
+                for signal in top_signals:
+                    if 'price' not in signal and df is not None and not df.empty:
+                        signal['price'] = df['close'].iloc[-1]
                 
                 # Process each signal
                 trade_setups = []
                 for signal in top_signals:
                     trade_setup = self.signal_generator.get_trade_setup(signal)
+                    
+                    # Skip invalid trade setups
+                    if not trade_setup:
+                        logger.warning(f"Invalid trade setup returned for signal: {signal}")
+                        continue
+                    
+                    # Validate the trade setup
+                    if (trade_setup.get('entry_price', 0) <= 0 or 
+                        trade_setup.get('stop_loss', 0) <= 0 or 
+                        trade_setup.get('take_profit', 0) <= 0 or 
+                        trade_setup.get('risk_reward', 0) <= 0):
+                        logger.warning(f"Invalid trade setup values: {trade_setup}")
+                        continue
+                    
                     trade_setup['timeframe'] = timeframe
                     trade_setups.append(trade_setup)
                 
-                # Store the best trade setup in user data
+                # If we have valid trade setups
                 if trade_setups:
+                    # Store the best trade setup in user data
                     context.user_data["current_trade_setup"] = trade_setups[0]
-                
-                # Create chart with the best trade setup
-                if trade_setups:
+                    
+                    # Import create_trade_chart here to avoid circular imports
+                    from trading_bot.utils.visualization import create_trade_chart
+                    
+                    # Create chart with the best trade setup
                     chart_buffer = create_trade_chart(
                         df,
                         trade_setups[0],
                         timestamp=datetime.now().strftime('%Y-%m-%d %H:%M:%S')
                     )
+                    
+                    # Create keyboard with accept/reject buttons for the best trade
+                    keyboard = [
+                        [
+                            InlineKeyboardButton("Accept Trade ✅", callback_data=f"trade_accept"),
+                            InlineKeyboardButton("Reject Trade ❌", callback_data=f"trade_reject")
+                        ],
+                        [
+                            InlineKeyboardButton("Modify Trade 🔧", callback_data=f"trade_modify"),
+                            InlineKeyboardButton("View Chart 📊", web_app=WebAppInfo(url=self._get_tradingview_url(symbol)))
+                        ]
+                    ]
+                    
+                    reply_markup = InlineKeyboardMarkup(keyboard)
+                    
+                    # Format message with all trade setups
+                    message_text = f"📊 Analysis for {symbol} on {timeframe} timeframe\n\n"
+                    
+                    if len(trade_setups) > 1:
+                        message_text += f"Found {len(trade_setups)} potential trade setups. Here are the top ones:\n\n"
+                    else:
+                        message_text += "Found 1 potential trade setup:\n\n"
+                    
+                    for i, setup in enumerate(trade_setups):
+                        message_text += f"*Trade Setup {i+1}:*\n"
+                        message_text += self._format_trade_setup(setup)
+                        message_text += "\n\n"
+                    
+                    if len(trade_setups) > 1:
+                        message_text += "You can accept, reject, or modify the top trade setup."
+                    
+                    if chart_buffer:
+                        # If we have a chart, send it as a photo
+                        # Check if this is a callback query or a direct message
+                        if update.callback_query:
+                            # For callback queries, we need to delete the original message first
+                            await message.delete()
+                            # Then send a new message with the photo
+                            await update.callback_query.message.reply_photo(
+                                photo=chart_buffer,
+                                caption=message_text[:1024],  # Limit caption to 1024 chars
+                                reply_markup=reply_markup,
+                                parse_mode='Markdown'
+                            )
+                        elif update.message:
+                            # For direct messages
+                            await message.delete()
+                            await update.message.reply_photo(
+                                photo=chart_buffer,
+                                caption=message_text[:1024],  # Limit caption to 1024 chars
+                                reply_markup=reply_markup,
+                                parse_mode='Markdown'
+                            )
+                        else:
+                            # If neither callback_query nor message is available, use the message parameter
+                            try:
+                                await message.delete()
+                                # Create a new message with just text
+                                new_message = await context.bot.send_message(
+                                    chat_id=message.chat_id,
+                                    text=message_text,
+                                    reply_markup=reply_markup,
+                                    parse_mode='Markdown'
+                                )
+                            except Exception as e:
+                                logger.error(f"Error sending message: {e}")
+                                # Fallback to editing the original message
+                                await message.edit_text(
+                                    message_text,
+                                    reply_markup=reply_markup,
+                                    parse_mode='Markdown'
+                                )
+                        
+                        # If the message is too long, send the rest as a text message
+                        if len(message_text) > 1024:
+                            chat_id = None
+                            if update.callback_query:
+                                chat_id = update.callback_query.message.chat_id
+                            elif update.message:
+                                chat_id = update.message.chat_id
+                            
+                            if chat_id:
+                                await context.bot.send_message(
+                                    chat_id=chat_id,
+                                    text=message_text[1024:],
+                                    parse_mode='Markdown'
+                                )
+                    else:
+                        # If chart creation failed, still show the trade setups with buttons
+                        logger.warning(f"Failed to create chart for {symbol} trade setup, showing text only")
+                        await message.edit_text(
+                            message_text,
+                            reply_markup=reply_markup,
+                            parse_mode='Markdown'
+                        )
                 else:
-                    chart_buffer = None
+                    # No valid trade setups
+                    await message.edit_text(
+                        f"Analysis for {symbol} on {timeframe} timeframe.\n\n"
+                        f"Found signals but couldn't create valid trade setups. Try another timeframe.\n\n"
+                        f"Click the button below to view the chart.",
+                        reply_markup=reply_markup
+                    )
+            else:
+                # Send analysis with no signals
+                await message.edit_text(
+                    f"Analysis for {symbol} on {timeframe} timeframe.\n\n"
+                    f"No trading signals found that meet the criteria (RR ≥ 2.0, Strength ≥ 60).\n\n"
+                    f"Click the button below to view the chart.",
+                    reply_markup=reply_markup
+                )
+                    
+        except Exception as e:
+            logger.error(f"Error in perform_analysis: {e}", exc_info=True)
+            try:
+                await message.edit_text(f"❌ Error analyzing {symbol} on {timeframe} timeframe: {str(e)}")
+            except Exception as inner_e:
+                logger.error(f"Failed to send error message: {inner_e}")
+                # Try to send a new message if editing fails
+                if update.callback_query:
+                    await update.callback_query.message.reply_text(f"❌ Error analyzing {symbol} on {timeframe} timeframe: {str(e)}")
+                elif update.message:
+                    await update.message.reply_text(f"❌ Error analyzing {symbol} on {timeframe} timeframe: {str(e)}")
+
+
+    async def perform_htf_analysis(
+    self, 
+    update: Update, 
+    context: ContextTypes.DEFAULT_TYPE,
+    symbol: str, 
+    timeframes: list[str], 
+    message: Message
+):
+        """Perform analysis on a symbol with Higher Timeframe (HTF) context"""
+        try:
+            # Get the combined strategy
+            combined_strategy = self.signal_generator.strategies.get('combined')
+            if not combined_strategy:
+                await message.edit_text(f"❌ Error: Combined strategy not available.")
+                return
+            
+            # Generate trade setups with HTF context
+            trade_setups = combined_strategy.generate_trade_setups_with_htf(symbol, timeframes)
+            
+            # Create TradingView URL with appropriate timeframe
+            tv_timeframe = self._convert_to_tv_timeframe(timeframes[-1])  # Use LTF for chart
+            tv_url = self._get_tradingview_url(symbol, tv_timeframe)
+            
+            # Create keyboard with TradingView chart button
+            keyboard = [
+                [InlineKeyboardButton(
+                    "Open Interactive Chart", 
+                    web_app=WebAppInfo(url=tv_url)
+                )]
+            ]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            
+            # Prepare analysis message
+            if trade_setups:
+                # Store the best trade setup in user data
+                context.user_data["current_trade_setup"] = trade_setups[0]
+                
+                # Get data for chart
+                df = await self.data_processor.get_data(symbol, timeframes[-1], bars=self.default_bars)
+                
+                # Create chart with the best trade setup
+                chart_buffer = create_trade_chart(
+                    df,
+                    trade_setups[0],
+                    timestamp=datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                )
                 
                 # Create keyboard with accept/reject buttons for the best trade
                 keyboard = [
@@ -737,15 +946,21 @@ class TelegramBot:
                 reply_markup = InlineKeyboardMarkup(keyboard)
                 
                 # Format message with all trade setups
-                message_text = f"📊 Analysis for {symbol} on {timeframe} timeframe\n\n"
-                message_text += f"Found {len(filtered_signals)} potential trade setups. Here are the top ones:\n\n"
+                message_text = f"📊 *Multi-Timeframe Analysis for {symbol}*\n\n"
+                message_text += f"HTF Bias: *{trade_setups[0].get('htf_bias', 'neutral').upper()}*\n\n"
+                
+                if len(trade_setups) > 1:
+                    message_text += f"Found {len(trade_setups)} potential trade setups. Here are the top ones:\n\n"
+                else:
+                    message_text += "Found 1 potential trade setup:\n\n"
                 
                 for i, setup in enumerate(trade_setups):
                     message_text += f"*Trade Setup {i+1}:*\n"
                     message_text += self._format_trade_setup(setup)
                     message_text += "\n\n"
                 
-                message_text += "You can accept, reject, or modify the top trade setup."
+                if len(trade_setups) > 1:
+                    message_text += "You can accept, reject, or modify the top trade setup."
                 
                 if chart_buffer:
                     # If we have a chart, send it as a photo
@@ -771,61 +986,65 @@ class TelegramBot:
                         reply_markup=reply_markup,
                         parse_mode='Markdown'
                     )
-                return
-                    
             else:
-                # Send analysis with no signals
+                # No valid trade setups
                 await message.edit_text(
-                    f"Analysis for {symbol} on {timeframe} timeframe.\n\n"
-                    f"No trading signals found that meet the criteria (RR ≥ 2.0, Strength ≥ 60).\n\n"
+                    f"Multi-Timeframe Analysis for {symbol}\n\n"
+                    f"No high-probability trade setups found that align with HTF bias.\n\n"
+                    f"Try another symbol or timeframe combination.\n\n"
                     f"Click the button below to view the chart.",
                     reply_markup=reply_markup
                 )
                     
         except Exception as e:
-            logger.error(f"Error in perform_analysis: {e}", exc_info=True)
-            await message.edit_text(f"❌ Error analyzing {symbol} on {timeframe} timeframe: {str(e)}")
+            logger.error(f"Error in perform_htf_analysis: {e}", exc_info=True)
+            await message.edit_text(f"❌ Error analyzing {symbol} with HTF context: {str(e)}")
 
-
-    # Add this method to ensure trades are properly recorded
-    def record_trade(self, trade_data):
+    def _get_multi_timeframe_list(self, timeframe: str) -> list[str]:
         """
-        Record a new trade in the journal
+        Get a list of timeframes for multi-timeframe analysis
         
         Args:
-            trade_data (dict): Trade data including symbol, direction, entry_price, etc.
+            timeframe (str): Base timeframe
             
         Returns:
-            str: Trade ID
+            list: List of timeframes from highest to lowest
         """
-        # Generate a unique trade ID
-        from uuid import uuid4
-        trade_id = str(uuid4())
+        # Define timeframe hierarchy
+        tf_hierarchy = {
+            'M1': 1, 'M5': 2, 'M15': 3, 'M30': 4, 'H1': 5, 'H4': 6, 'D1': 7, 'W1': 8
+        }
         
-        # Add additional fields
-        trade_data['id'] = trade_id
-        trade_data['status'] = 'pending'
-        trade_data['entry_time'] = datetime.now().isoformat()
-        trade_data['outcome'] = None
-        trade_data['exit_time'] = None
-        trade_data['exit_price'] = None
-        trade_data['profit_loss'] = 0
-        trade_data['profit_loss_pips'] = 0
+        # Get the index of the base timeframe
+        base_index = tf_hierarchy.get(timeframe, 3)  # Default to M15 if not found
         
-        # Save to database
-        self._save_trade(trade_data)
+        # Define timeframe combinations based on base timeframe
+        if base_index <= 2:  # M1, M5
+            return ['H1', 'M15', timeframe]
+        elif base_index == 3:  # M15
+            return ['H4', 'H1', 'M15']
+        elif base_index == 4:  # M30
+            return ['H4', 'H1', 'M30']
+        elif base_index == 5:  # H1
+            return ['D1', 'H4', 'H1']
+        elif base_index == 6:  # H4
+            return ['W1', 'D1', 'H4']
+        elif base_index >= 7:  # D1, W1
+            return ['W1', 'D1', timeframe]
         
-        logger.info(f"Recorded new trade: {trade_id} - {trade_data['symbol']} {trade_data['direction']}")
-        
-        return trade_id
+        # Default fallback
+        return ['D1', 'H4', timeframe]
+
+
     
     async def button_callback(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle button callbacks"""
         query = update.callback_query
         await query.answer()
-    
+
         callback_data = query.data
-    
+        logger.debug(f"Callback data: {callback_data}")
+
         if callback_data.startswith("pairs_"):
             # Handle pairs selection
             market = callback_data.split("_")[1]
@@ -834,22 +1053,26 @@ class TelegramBot:
         elif callback_data.startswith("account_"):
             # Handle account selection
             await self._show_account_balance(query)
-    
+
         elif callback_data.startswith("analyze_"):
             if "_" in callback_data[8:]:
                 # Handle specific symbol and timeframe analysis
                 _, symbol, timeframe = callback_data.split("_")
-                await self.analyze_command_with_args(update, context, symbol, timeframe)
+                # Edit message to show "analyzing"
+                message = query.message
+                await message.edit_text(f"Analyzing {symbol} on {timeframe} timeframe... ⏳")
+                # Perform analysis
+                await self.perform_analysis(update, context, symbol, timeframe, message)
             else:
                 # Handle analyze market selection
                 market = callback_data.split("_")[1]
                 await self._show_pairs_for_analysis(query, market)
-    
+
         elif callback_data.startswith("chart_"):
             # Handle chart market selection
             market = callback_data.split("_")[1]
             await self._show_pairs_for_chart(query, market)
-    
+
         elif callback_data.startswith("pair_"):
             # Handle specific pair selection
             parts = callback_data.split("_")
@@ -865,7 +1088,7 @@ class TelegramBot:
             else:
                 # Show pair info
                 await self._show_pair_info(query, symbol)
-    
+
         elif callback_data.startswith("tf_"):
             # Handle timeframe selection
             parts = callback_data.split("_")
@@ -873,21 +1096,15 @@ class TelegramBot:
             timeframe = parts[2]
         
             # Edit message to show "analyzing"
-            await query.edit_message_text(f"Analyzing {symbol} on {timeframe} timeframe... ⏳")
+            message = query.message
+            await message.edit_text(f"Analyzing {symbol} on {timeframe} timeframe... ⏳")
         
             # Perform analysis
-            await self.perform_analysis(update, context, symbol, timeframe, query.message)
+            await self.perform_analysis(update, context, symbol, timeframe, message)
 
         elif callback_data.startswith("trade_"):
-            # Handle trade actions (take trade, skip, etc.)
-            if len(callback_data.split("_")) > 1:
-                action = callback_data.split("_")[1]
-                if action == "take":
-                    await self.take_trade(update, context)
-                elif action == "skip":
-                    await self.skip_trade(update, context)
-            else:
-                await self.handle_trade_decision(update, context)
+            # Handle trade actions (accept, reject, modify)
+            await self.handle_trade_decision(update, context)
             
         elif callback_data.startswith("journal"):
             if callback_data == "journal_pending":
@@ -896,18 +1113,17 @@ class TelegramBot:
                 await self.show_completed_trades(update, context)
             elif callback_data == "journal_performance":
                 await self.show_performance(update, context)
-            # In the button_callback method, add this case in the journal section:
             elif callback_data == "journal_active":
                 await self.show_active_trades(update, context)
-
             else:
                 await self.journal_command(update, context)
             
         elif callback_data.startswith("modify_"):
             await self.handle_trade_modification(update, context)
-    
+
         else:
-            await query.edit_message_text(text=f"Unknown callback: {callback_data}")   
+            await query.edit_message_text(text=f"Unknown callback: {callback_data}")
+ 
 
     async def _show_pairs_for_market(self, query, market):
         """Show pairs for a specific market"""
@@ -1181,7 +1397,7 @@ class TelegramBot:
         return base_url
     
     def _format_trade_setup(self, trade_setup):
-        """Format trade setup for display with improved number formatting and position sizing"""
+        """Format trade setup for display with improved number formatting, position sizing, and HTF analysis"""
         direction = trade_setup.get('direction', 'UNKNOWN')
         entry_price = trade_setup.get('entry_price', 0)
         stop_loss = trade_setup.get('stop_loss', 0)
@@ -1191,6 +1407,8 @@ class TelegramBot:
         symbol = trade_setup.get('symbol', 'Unknown')
         timeframe = trade_setup.get('timeframe', 'Unknown')
         strategy = trade_setup.get('strategy', 'Unknown')
+        htf_bias = trade_setup.get('htf_bias', None)
+        aligned_with_htf = trade_setup.get('aligned_with_htf', False)
         
         # Calculate risk in pips/points
         risk_points = abs(entry_price - stop_loss)
@@ -1240,13 +1458,16 @@ class TelegramBot:
             
             # Calculate potential profit and loss
             position_size = position_info.get('position_size', 0)
-            
             if direction == 'BUY':
                 potential_profit = position_size * (take_profit - entry_price)
                 potential_loss = position_size * (entry_price - stop_loss)
             else:  # SELL
                 potential_profit = position_size * (entry_price - take_profit)
                 potential_loss = position_size * (stop_loss - entry_price)
+
+            # Ensure values are not negative due to calculation errors
+            potential_profit = max(0, potential_profit)
+            potential_loss = max(0, potential_loss)
         else:
             # Use default values if no user ID
             account_size = 10000.0
@@ -1279,8 +1500,17 @@ class TelegramBot:
             f"📊 *Trade Setup: {direction}*\n\n"
             f"Symbol: {symbol}\n"
             f"Timeframe: {timeframe}\n"
-            f"Strategy: {strategy}\n\n"
-            f"Entry: {price_format.format(entry_price)}\n"
+            f"Strategy: {strategy}\n"
+        )
+        
+        # Add HTF bias if available
+        if htf_bias:
+            message += f"HTF Bias: *{htf_bias.upper()}*\n"
+            if aligned_with_htf:
+                message += f"✅ Aligned with HTF bias\n"
+        
+        message += (
+            f"\nEntry: {price_format.format(entry_price)}\n"
             f"Stop Loss: {price_format.format(stop_loss)}\n"
             f"Take Profit: {price_format.format(take_profit)}\n\n"
             f"Risk: {price_format.format(risk_points)} points\n"
@@ -1299,7 +1529,7 @@ class TelegramBot:
         
         # Add analysis reason
         message += f"*Analysis:*\n{reason}"
-
+        
         return message
 
   

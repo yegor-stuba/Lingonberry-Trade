@@ -4,7 +4,7 @@ Web dashboard for the trading bot
 
 import os
 import logging
-from flask import Flask, render_template, request, jsonify, send_from_directory
+from flask import Flask, render_template, request, jsonify, send_from_directory, redirect
 from datetime import datetime, timedelta
 import json
 from flask_cors import CORS  # Add this import
@@ -180,9 +180,25 @@ def get_system_uptime():
 
 @app.route('/telegram_journal')
 def telegram_journal():
-    """Render the journal page optimized for Telegram mini app"""
-    return render_template('telegram_journal.html')
-
+    """Render the Telegram Mini App version of the journal"""
+    user_id = request.args.get('user_id', type=int)
+    
+    # Get trades for this user
+    trades = trade_journal.get_trades(user_id=user_id)
+    
+    # Calculate performance metrics
+    metrics = trade_journal.calculate_performance_metrics(user_id=user_id)
+    
+    # Get performance history for charts
+    history = trade_journal.get_performance_history(user_id=user_id, days=30)
+    
+    return render_template(
+        'telegram_mini_app.html',
+        trades=trades,
+        metrics=metrics,
+        history=history,
+        user_id=user_id
+    )
 @app.route('/api/journal_summary')
 def get_journal_summary():
     """API endpoint to get a summary of the journal for Telegram"""

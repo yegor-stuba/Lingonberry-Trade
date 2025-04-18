@@ -1,14 +1,6 @@
-(stable_venv) yegor@tourist trading bot 2 % python -m pip install pyngrok
-Collecting pyngrok
-  Downloading pyngrok-7.2.4-py3-none-any.whl.metadata (8.7 kB)
-Requirement already satisfied: PyYAML>=5.1 in ./stable_venv/lib/python3.10/site-packages (from pyngrok) (6.0.2)
-Downloading pyngrok-7.2.4-py3-none-any.whl (23 kB)
-Installing collected packages: pyngrok
-Successfully installed pyngrok-7.2.4
-(stable_venv) yegor@tourist trading bot 2 % pip list | grep pyngrok
-pyngrok             7.2.4
 (stable_venv) yegor@tourist trading bot 2 % tree -L 3
 .
+├── Dockerfile
 ├── RAED.md
 ├── README.md
 ├── cdoc.md
@@ -110,39 +102,79 @@ pyngrok             7.2.4
 │       └── XAUUSD60.csv
 ├── csample.txt
 ├── data
+│   ├── AUDUSD_D1.csv
+│   ├── AUDUSD_H1.csv
+│   ├── AUDUSD_H4.csv
+│   ├── AUDUSD_M15.csv
 │   ├── BTCUSD_H1.csv
 │   ├── BTCUSD_H1_live.csv
 │   ├── BTCUSD_M1.csv
 │   ├── BTCUSD_M1_live.csv
 │   ├── BTCUSD_M5.csv
 │   ├── BTCUSD_M5_live.csv
+│   ├── CUSTOM_SYMBOL_H1.csv
+│   ├── EURUSD_D1.csv
 │   ├── EURUSD_H1.csv
 │   ├── EURUSD_H4.csv
 │   ├── EURUSD_M15.csv
 │   ├── EURUSD_M30.csv
 │   ├── EURUSD_M5.csv
+│   ├── GBPJPY_D1.csv
+│   ├── GBPJPY_H1.csv
+│   ├── GBPJPY_H4.csv
 │   ├── GBPJPY_M15.csv
 │   ├── GBPJPY_M30.csv
+│   ├── GBPUSD_D1.csv
+│   ├── GBPUSD_H1.csv
+│   ├── GBPUSD_H4.csv
 │   ├── GBPUSD_M1.csv
 │   ├── GBPUSD_M15.csv
 │   ├── GBPUSD_M30.csv
 │   ├── GBPUSD_M5.csv
 │   ├── NAS100_H1.csv
+│   ├── US30_D1.csv
+│   ├── US30_H1.csv
+│   ├── US30_H4.csv
+│   ├── US30_M15.csv
+│   ├── US500_D1.csv
+│   ├── US500_H1.csv
+│   ├── US500_H4.csv
+│   ├── US500_M15.csv
+│   ├── USDCAD_D1.csv
+│   ├── USDCAD_H1.csv
+│   ├── USDCAD_H4.csv
 │   ├── USDCAD_M15.csv
+│   ├── USDJPY_D1.csv
+│   ├── USDJPY_H1.csv
+│   ├── USDJPY_H4.csv
 │   ├── USDJPY_M15.csv
 │   ├── USDJPY_M30.csv
+│   ├── USTEC_D1.csv
+│   ├── USTEC_H1.csv
+│   ├── USTEC_H4.csv
+│   ├── USTEC_M15.csv
 │   ├── USTEC_M30.csv
+│   ├── XAGUSD_D1.csv
+│   ├── XAGUSD_H1.csv
+│   ├── XAGUSD_H4.csv
+│   ├── XAGUSD_M15.csv
+│   ├── XAUUSD_D1.csv
 │   ├── XAUUSD_H1.csv
+│   ├── XAUUSD_H4.csv
 │   ├── XAUUSD_M15.csv
 │   └── trade_journal.db
+├── docker-compose.yml
 ├── journal
 │   └── trade_journal.json
+├── logs
+│   └── trading_bot.log
+├── netlify
+│   └── assets
+│       └── css
 ├── ngrok.yml
 ├── plan.txt
 ├── qc.txt
-├── scripts
-│   ├── fetch_data.py
-│   └── run_combined_backtest.py
+├── run.py
 ├── setup.py
 ├── stable_venv
 │   ├── bin
@@ -200,11 +232,16 @@ pyngrok             7.2.4
 │       └── man
 ├── structure.txt
 ├── tests
+│   ├── __pycache__
+│   │   ├── test_combined_strategy_integration.cpython-310.pyc
+│   │   └── test_ctrader_reconnection.cpython-310.pyc
+│   ├── test.py
 │   ├── test_combined_strategy.py
-│   ├── test_combined_strategy_implementation.py
+│   ├── test_combined_strategy_integration.py
 │   ├── test_credentials.py
 │   ├── test_ctrader.py
 │   ├── test_ctrader_data_enhanced.py
+│   ├── test_ctrader_reconnection.py
 │   ├── test_data_processor.py
 │   ├── test_ict_strategy.py
 │   ├── test_sentiment_analyzer.py
@@ -266,7 +303,6 @@ pyngrok             7.2.4
 │   │   └── strategy_base.py
 │   ├── ui
 │   │   ├── __init__.py
-│   │   ├── __pycache__
 │   │   ├── telegram_bot.py
 │   │   └── web_dashboard
 │   └── utils
@@ -276,5 +312,5 @@ pyngrok             7.2.4
 │       └── visualization.py
 └── trading_bot.log
 
-40 directories, 227 files
+43 directories, 269 files
 (stable_venv) yegor@tourist trading bot 2 % 

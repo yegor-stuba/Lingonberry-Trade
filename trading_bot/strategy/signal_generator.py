@@ -7,6 +7,7 @@ import logging
 from typing import Dict, List, Optional, Union
 import pandas as pd
 import asyncio
+from datetime import datetime
 
 from trading_bot.strategy.strategy_base import Strategy
 from trading_bot.strategy.smc_strategy import SMCStrategy
@@ -216,79 +217,96 @@ class SignalGenerator:
     
     def get_trade_setup(self, signal: Dict) -> Dict:
         """
-        Get trade setup from a signal
+        Get a trade setup from a signal
         
         Args:
             signal (dict): Trading signal
             
         Returns:
-            dict: Trade setup
+            dict: Trade setup or empty dict if invalid
         """
         if not signal:
+            logger.warning("Cannot calculate trade setup: signal is None")
             return {}
         
-        # Extract basic signal info
-        symbol = signal.get('symbol', '')
-        direction = signal.get('direction', '')
+        # Extract signal data
+        symbol = signal.get('symbol')
+        if not symbol:
+            logger.warning("Cannot calculate trade setup: no symbol in signal")
+            return {}
         
-        # Get entry, stop loss, and take profit
-        entry_price = signal.get('entry_price', 0)
-        stop_loss = signal.get('stop_loss', 0)
-        take_profit = signal.get('take_profit', 0)
-        
-        # If entry price is not provided, use the current price
-        if entry_price == 0 and 'price' in signal:
-            entry_price = signal['price']
-        
-        # If stop loss or take profit are not provided, calculate them
-        if stop_loss == 0 or take_profit == 0:
-            # Get the current price if not already set
-            current_price = entry_price if entry_price > 0 else signal.get('price', 0)
-            
-            # If we still don't have a price, we can't calculate
-            if current_price == 0:
+        # Get direction
+        direction = signal.get('direction')
+        if not direction:
+            # Try to infer direction from signal type
+            signal_type = signal.get('type', '')
+            if signal_type == 'bullish':
+                direction = 'BUY'
+            elif signal_type == 'bearish':
+                direction = 'SELL'
+            else:
+                logger.warning(f"Cannot calculate trade setup: no direction in signal for {symbol}")
                 return {}
-            
-            # Calculate ATR-based stop loss and take profit
-            atr_value = signal.get('atr', 0)
-            if atr_value == 0:
-                # Use a default percentage if ATR is not available
-                atr_value = current_price * 0.01  # 1% of price
+        
+        # Get current price
+        current_price = signal.get('price')
+        if not current_price or current_price <= 0:
+            logger.warning(f"Cannot calculate trade setup: no valid price for {symbol}")
+            return {}
+        
+        # Get ATR for stop loss calculation if not provided
+        atr = signal.get('atr')
+        if not atr or atr <= 0:
+            # Use a default ATR value based on price
+            atr = current_price * 0.005  # 0.5% of price as default ATR
+        
+        # Calculate entry, stop loss, and take profit
+        entry_price = signal.get('entry_price', current_price)
+        
+        # If entry price is not provided or invalid, use current price
+        if entry_price <= 0:
+            entry_price = current_price
+        
+        # Calculate stop loss and take profit if not provided
+        stop_loss = signal.get('stop_loss')
+        take_profit = signal.get('take_profit')
+        
+        if not stop_loss or stop_loss <= 0:
+            # Calculate stop loss based on ATR
+            if direction == 'BUY':
+                stop_loss = entry_price - (2 * atr)
+            else:  # SELL
+                stop_loss = entry_price + (2 * atr)
+        
+        if not take_profit or take_profit <= 0:
+            # Calculate take profit based on ATR and risk-reward ratio
+            risk = abs(entry_price - stop_loss)
+            min_reward = risk * 2  # Minimum risk-reward ratio of 2
             
             if direction == 'BUY':
-                if stop_loss == 0:
-                    stop_loss = current_price - (2 * atr_value)
-                if take_profit == 0:
-                    take_profit = current_price + (4 * atr_value)  # 2:1 risk-reward
+                take_profit = entry_price + min_reward
             else:  # SELL
-                if stop_loss == 0:
-                    stop_loss = current_price + (2 * atr_value)
-                if take_profit == 0:
-                    take_profit = current_price - (4 * atr_value)  # 2:1 risk-reward
+                take_profit = entry_price - min_reward
         
         # Calculate risk-reward ratio
-        if direction == 'BUY':
-            risk = entry_price - stop_loss if stop_loss > 0 else 0
-            reward = take_profit - entry_price if take_profit > 0 else 0
-        else:  # SELL
-            risk = stop_loss - entry_price if stop_loss > 0 else 0
-            reward = entry_price - take_profit if take_profit > 0 else 0
-        
+        risk = abs(entry_price - stop_loss)
+        reward = abs(entry_price - take_profit)
         risk_reward = reward / risk if risk > 0 else 0
         
-        # Calculate risk and reward percentages
-        risk_pct = (risk / entry_price) * 100 if entry_price > 0 else 0
-        reward_pct = (reward / entry_price) * 100 if entry_price > 0 else 0
+        # Skip if risk-reward is too low
+        if risk_reward < 1.5:
+            logger.warning(f"Skipping trade setup for {symbol}: risk-reward too low ({risk_reward:.2f})")
+            return {}
         
-        # Get reason or create one
-        reason = signal.get('reason', '')
-        if not reason and 'description' in signal:
-            reason = signal['description']
-        if not reason:
-            reason = f"{direction} signal with {risk_reward:.2f} risk-reward ratio"
+        # Calculate position size based on risk management
+        account_size = 10000  # Default account size
+        risk_percentage = 1.0  # Default risk percentage
         
-        # Get strategy name
-        strategy_name = signal.get('strategy', 'Unknown')
+        # Calculate risk amount
+        risk_amount = account_size * (risk_percentage / 100)
+        
+        # Calculate position size
+        position_size = risk_amount / risk if risk > 0 else 0
         
         # Create trade setup
         trade_setup = {
@@ -298,18 +316,24 @@ class SignalGenerator:
             'stop_loss': stop_loss,
             'take_profit': take_profit,
             'risk_reward': risk_reward,
-            'risk_pct': risk_pct,
-            'reward_pct': reward_pct,
-            'reason': reason,
-            'strategy': strategy_name,
-            'timestamp': pd.Timestamp.now().strftime('%Y-%m-%d %H:%M:%S')
+            'position_size': position_size,
+            'risk_amount': risk_amount,
+            'reason': signal.get('description', signal.get('reason', 'No reason provided')),
+            'timestamp': datetime.now().isoformat()
         }
+        
+        # Validate the trade setup
+        if (trade_setup['entry_price'] <= 0 or 
+            trade_setup['stop_loss'] <= 0 or 
+            trade_setup['take_profit'] <= 0 or 
+            trade_setup['risk_reward'] <= 0):
+            logger.warning(f"Invalid trade setup values: {trade_setup}")
+            return {}
         
         return trade_setup
 
     
-    def filter_signals(self, signals: List[Dict], min_risk_reward: float = 3.0, 
-                      min_strength: int = 70) -> List[Dict]:
+    def filter_signals(self, signals: List[Dict], min_risk_reward=2.0, min_strength=70) -> List[Dict]:
         """
         Filter signals based on criteria
         
@@ -321,16 +345,49 @@ class SignalGenerator:
         Returns:
             list: Filtered signals
         """
-        filtered = []
+        if not signals:
+            return []
         
-        for signal in signals:
-            risk_reward = signal.get('risk_reward', 0)
-            strength = signal.get('strength', 0)
+        # Filter signals by strength
+        filtered_by_strength = [s for s in signals if s.get('strength', 0) >= min_strength]
+        
+        # Filter signals by risk-reward ratio if available
+        filtered_signals = []
+        for signal in filtered_by_strength:
+            # If risk-reward is already calculated
+            if 'risk_reward' in signal and signal['risk_reward'] >= min_risk_reward:
+                filtered_signals.append(signal)
+                continue
             
-            if risk_reward >= min_risk_reward and strength >= min_strength:
-                filtered.append(signal)
+            # If we have entry, stop loss, and take profit, calculate risk-reward
+            if all(k in signal for k in ['entry_price', 'stop_loss', 'take_profit']):
+                entry = signal['entry_price']
+                sl = signal['stop_loss']
+                tp = signal['take_profit']
+                
+                # Calculate risk-reward
+                risk = abs(entry - sl)
+                reward = abs(entry - tp)
+                
+                if risk > 0:
+                    risk_reward = reward / risk
+                    signal['risk_reward'] = risk_reward
+                    
+                    if risk_reward >= min_risk_reward:
+                        filtered_signals.append(signal)
+            else:
+                # If we don't have enough data to calculate risk-reward,
+                # include the signal anyway and let get_trade_setup handle it
+                filtered_signals.append(signal)
         
-        return filtered
+        # If no signals meet the criteria, return the strongest signals
+        if not filtered_signals and filtered_by_strength:
+            # Sort by strength and return top 3
+            sorted_by_strength = sorted(filtered_by_strength, key=lambda x: x.get('strength', 0), reverse=True)
+            return sorted_by_strength[:3]
+        
+        return filtered_signals
+
     
     def get_best_signal(self, signals: List[Dict]) -> Optional[Dict]:
         """

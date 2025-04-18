@@ -68,27 +68,6 @@ def is_night_time(timezone='Europe/London'):
         # Default to day time if there's an error
         return False
 
-def format_price_for_symbol(price, symbol):
-    """
-    Format price with appropriate decimal places based on symbol
-    
-    Args:
-        price (float): Price to format
-        symbol (str): Trading symbol
-        
-    Returns:
-        str: Formatted price
-    """
-    if 'JPY' in symbol:
-        return f"{price:.3f}"
-    elif 'XAU' in symbol:
-        return f"{price:.2f}"
-    elif any(crypto in symbol for crypto in ['BTC', 'ETH', 'USDT', 'USD']):
-        # For all crypto pairs, use 2 decimal places
-        return f"{price:.2f}"
-    else:
-        return f"{price:.5f}"
-
 def create_price_chart(df, symbol, timeframe, indicators=None, timestamp=None):
     """
     Create a price chart with indicators
@@ -147,7 +126,7 @@ def create_price_chart(df, symbol, timeframe, indicators=None, timestamp=None):
             s = mpf.make_mpf_style(
                 marketcolors=mc,
                 gridstyle='--',
-                y_on_right=True,  # Price on the right side
+                y_on_right=True,
                 facecolor='#212121',
                 figcolor='#212121',
                 edgecolor='#424242',
@@ -167,63 +146,13 @@ def create_price_chart(df, symbol, timeframe, indicators=None, timestamp=None):
             s = mpf.make_mpf_style(
                 marketcolors=mc,
                 gridstyle='--',
-                y_on_right=True,  # Price on the right side
+                y_on_right=True,
                 facecolor='white',
                 figcolor='white',
                 edgecolor='black',
                 gridcolor='#e0e0e0',
                 rc={'font.size': 10}
             )
-        
-        # Prepare additional plots for indicators
-        apds = []
-        
-        if indicators:
-            # Add moving averages
-            if 'ma' in indicators:
-                for period in indicators['ma']:
-                    df[f'ma{period}'] = df['close'].rolling(window=period).mean()
-                    # Skip if we have NaN values or insufficient data
-                    if df[f'ma{period}'].isna().all() or len(df[f'ma{period}'].dropna()) < 2:
-                        continue
-                    apds.append(
-                        mpf.make_addplot(df[f'ma{period}'], color='blue', width=1, linestyle='-')
-                    )
-            
-            # Add RSI
-            if 'rsi' in indicators:
-                period = indicators['rsi']
-                # Only calculate RSI if we have enough data
-                if len(df) > period:
-                    delta = df['close'].diff()
-                    gain = delta.where(delta > 0, 0)
-                    loss = -delta.where(delta < 0, 0)
-                    avg_gain = gain.rolling(window=period).mean()
-                    avg_loss = loss.rolling(window=period).mean()
-                    
-                    # Handle division by zero
-                    rs = avg_gain / avg_loss.replace(0, np.nan)
-                    rs = rs.fillna(0)  # Replace NaN with 0
-                    
-                    df['rsi'] = 100 - (100 / (1 + rs))
-                    
-                    # Skip if we have NaN values or insufficient data
-                    if not df['rsi'].isna().all() and len(df['rsi'].dropna()) > 2:
-                        # Create a separate subplot for RSI
-                        apds.append(
-                            mpf.make_addplot(df['rsi'], panel=1, color='purple', 
-                                            secondary_y=False, ylabel='RSI')
-                        )
-                        
-                        # Add RSI overbought/oversold lines
-                        apds.append(
-                            mpf.make_addplot([70] * len(df), panel=1, color='red', 
-                                            linestyle='--', secondary_y=False)
-                        )
-                        apds.append(
-                            mpf.make_addplot([30] * len(df), panel=1, color='green', 
-                                            linestyle='--', secondary_y=False)
-                        )
         
         # Create the plot
         title = f'{symbol} - {timeframe} Chart'
@@ -233,32 +162,17 @@ def create_price_chart(df, symbol, timeframe, indicators=None, timestamp=None):
         # Save to bytes buffer
         buf = io.BytesIO()
         
-        # Determine if we need a second panel for RSI
-        if indicators and 'rsi' in indicators and len(df) > indicators['rsi']:
-            # Plot with RSI panel but no volume
-            mpf.plot(
-                df,
-                type='candle',
-                style=s,
-                title=title,
-                volume=False,  # No volume
-                figsize=(12, 8),
-                panel_ratios=(4, 1),  # Price, RSI
-                addplot=apds,
-                savefig=dict(fname=buf, dpi=100, bbox_inches='tight')
-            )
-        else:
-            # Plot without RSI panel and no volume
-            mpf.plot(
-                df,
-                type='candle',
-                style=s,
-                title=title,
-                volume=False,  # No volume
-                figsize=(12, 8),
-                addplot=apds,
-                savefig=dict(fname=buf, dpi=100, bbox_inches='tight')
-            )
+        # Plot without volume for cleaner look
+        mpf.plot(
+            df,
+            type='candle',
+            style=s,
+            title=title,
+            volume=False,
+            figsize=(12, 8),
+            addplot=[],
+            savefig=dict(fname=buf, dpi=100, bbox_inches='tight')
+        )
         
         buf.seek(0)
         return buf
@@ -321,7 +235,7 @@ def create_trade_chart(df, trade_data, timestamp=None):
             s = mpf.make_mpf_style(
                 marketcolors=mc,
                 gridstyle='--',
-                y_on_right=True,  # Price on the right side
+                y_on_right=True,
                 facecolor='#212121',
                 figcolor='#212121',
                 edgecolor='#424242',
@@ -348,7 +262,7 @@ def create_trade_chart(df, trade_data, timestamp=None):
             s = mpf.make_mpf_style(
                 marketcolors=mc,
                 gridstyle='--',
-                y_on_right=True,  # Price on the right side
+                y_on_right=True,
                 facecolor='white',
                 figcolor='white',
                 edgecolor='black',
@@ -376,14 +290,14 @@ def create_trade_chart(df, trade_data, timestamp=None):
             timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         title = f"{symbol} - {direction} Setup ({timestamp})"
         
-        # Plot the chart without volume
+        # Plot the chart without volume for cleaner look
         fig, axes = mpf.plot(
             df_plot,
             type='candle',
             style=s,
             title=title,
             hlines=hlines,
-            volume=False,  # No volume
+            volume=False,
             figsize=(12, 8),
             returnfig=True
         )
@@ -392,31 +306,29 @@ def create_trade_chart(df, trade_data, timestamp=None):
         ax = axes[0]
         
         # Format prices based on symbol type
-        entry_price_str = format_price_for_symbol(entry_price, symbol)
-        stop_loss_str = format_price_for_symbol(stop_loss, symbol)
-        take_profit_str = format_price_for_symbol(take_profit, symbol)
+        if 'JPY' in symbol:
+            price_format = "{:.3f}"
+        elif 'XAU' in symbol:
+            price_format = "{:.2f}"
+        else:
+            price_format = "{:.5f}"
         
-        # Add text annotations in the top right corner with better formatting and spacing
-        # Use right alignment for better visibility in the top right corner
-        ax.text(0.98, 0.98, f"Entry: {entry_price_str}", 
+        # Add text annotations with better formatting and more spacing
+        ax.text(0.02, 0.98, f"Entry: {price_format.format(entry_price)}", 
                 transform=ax.transAxes, color=entry_color, fontsize=10, 
-                horizontalalignment='right', verticalalignment='top', 
-                bbox=dict(facecolor=box_color, alpha=0.8, edgecolor=entry_color, boxstyle='round,pad=0.5'))
+                verticalalignment='top', bbox=dict(facecolor=box_color, alpha=0.8, edgecolor=entry_color, boxstyle='round,pad=0.5'))
         
-        ax.text(0.98, 0.91, f"Stop Loss: {stop_loss_str}", 
+        ax.text(0.02, 0.91, f"Stop Loss: {price_format.format(stop_loss)}", 
                 transform=ax.transAxes, color=sl_color, fontsize=10, 
-                horizontalalignment='right', verticalalignment='top', 
-                bbox=dict(facecolor=box_color, alpha=0.8, edgecolor=sl_color, boxstyle='round,pad=0.5'))
+                verticalalignment='top', bbox=dict(facecolor=box_color, alpha=0.8, edgecolor=sl_color, boxstyle='round,pad=0.5'))
         
-        ax.text(0.98, 0.84, f"Take Profit: {take_profit_str}", 
+        ax.text(0.02, 0.84, f"Take Profit: {price_format.format(take_profit)}", 
                 transform=ax.transAxes, color=tp_color, fontsize=10, 
-                horizontalalignment='right', verticalalignment='top', 
-                bbox=dict(facecolor=box_color, alpha=0.8, edgecolor=tp_color, boxstyle='round,pad=0.5'))
+                verticalalignment='top', bbox=dict(facecolor=box_color, alpha=0.8, edgecolor=tp_color, boxstyle='round,pad=0.5'))
         
-        ax.text(0.98, 0.77, f"Risk/Reward: {risk_reward:.2f}", 
+        ax.text(0.02, 0.77, f"Risk/Reward: {risk_reward:.2f}", 
                 transform=ax.transAxes, color=text_color, fontsize=10, 
-                horizontalalignment='right', verticalalignment='top', 
-                bbox=dict(facecolor=box_color, alpha=0.8, edgecolor=text_color, boxstyle='round,pad=0.5'))
+                verticalalignment='top', bbox=dict(facecolor=box_color, alpha=0.8, edgecolor=text_color, boxstyle='round,pad=0.5'))
         
         # Add direction arrow
         arrow_y = entry_price
@@ -502,7 +414,7 @@ def create_analysis_chart(df, analysis_data, timestamp=None):
             s = mpf.make_mpf_style(
                 marketcolors=mc,
                 gridstyle='--',
-                y_on_right=True,  # Price on the right side
+                y_on_right=True,
                 facecolor='#212121',
                 figcolor='#212121',
                 edgecolor='#424242',
@@ -528,7 +440,7 @@ def create_analysis_chart(df, analysis_data, timestamp=None):
             s = mpf.make_mpf_style(
                 marketcolors=mc,
                 gridstyle='--',
-                y_on_right=True,  # Price on the right side
+                y_on_right=True,
                 facecolor='white',
                 figcolor='white',
                 edgecolor='black',
@@ -596,14 +508,14 @@ def create_analysis_chart(df, analysis_data, timestamp=None):
                 ema200 = indicators['ema200']
                 apds.append(mpf.make_addplot(ema200, color='#ffcc80', width=1.5))
         
-        # Plot the chart without volume
+        # Plot the chart without volume for cleaner look
         fig, axes = mpf.plot(
             df_plot,
             type='candle',
             style=s,
             title=title,
             hlines=hlines_dict if hlines else None,
-            volume=False,  # No volume
+            volume=False,
             figsize=(12, 8),
             addplot=apds,
             returnfig=True
@@ -611,6 +523,14 @@ def create_analysis_chart(df, analysis_data, timestamp=None):
         
         # Add annotations for key levels
         ax = axes[0]
+        
+        # Format prices based on symbol type
+        if 'JPY' in symbol:
+            price_format = "{:.3f}"
+        elif 'XAU' in symbol:
+            price_format = "{:.2f}"
+        else:
+            price_format = "{:.5f}"
         
         # Add text annotations for key levels
         y_positions = {}  # Track y-positions to avoid overlap
@@ -624,9 +544,6 @@ def create_analysis_chart(df, analysis_data, timestamp=None):
                 # Determine color based on level type
                 color = support_color if level_type.lower() == 'support' else resistance_color
                 
-                # Format price based on symbol
-                price_str = format_price_for_symbol(level_price, symbol)
-                
                 # Find a position for the text that doesn't overlap
                 y_pos = 0.98 - (i * 0.07)
                 while y_pos in y_positions and y_pos > 0.1:
@@ -636,7 +553,7 @@ def create_analysis_chart(df, analysis_data, timestamp=None):
                 
                 # Add the annotation
                 ax.text(0.02, y_pos, 
-                        f"{level_type.capitalize()}: {price_str} (Strength: {level_strength})", 
+                        f"{level_type.capitalize()}: {price_format.format(level_price)} (Strength: {level_strength})", 
                         transform=ax.transAxes, color=color, fontsize=9, 
                         verticalalignment='top', bbox=dict(facecolor=box_color, alpha=0.8, edgecolor=color, boxstyle='round,pad=0.5'))
         
@@ -703,4 +620,27 @@ def save_chart_to_file(chart_buffer, filename):
     except Exception as e:
         logger.error(f"Error saving chart to file: {e}")
         return False
+
+def format_price_for_symbol(price, symbol):
+    """
+    Format price with appropriate decimal places based on symbol
+    
+    Args:
+        price (float): Price to format
+        symbol (str): Trading symbol
+        
+    Returns:
+        str: Formatted price
+    """
+    if 'JPY' in symbol:
+        return f"{price:.3f}"
+    elif 'XAU' in symbol:
+        return f"{price:.2f}"
+    elif any(crypto in symbol for crypto in ['BTC', 'ETH']):
+        if price > 1000:
+            return f"{price:.2f}"
+        else:
+            return f"{price:.5f}"
+    else:
+        return f"{price:.5f}"
 

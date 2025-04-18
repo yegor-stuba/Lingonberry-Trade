@@ -173,6 +173,17 @@ class CombinedStrategy(Strategy):
         """
         high_prob_setups = []
         
+        # Ensure we have data
+        if df is None or df.empty:
+            logger.warning(f"Empty dataframe provided for {symbol}")
+            return high_prob_setups
+        
+        # Get current price - ensure it's not 0
+        current_price = df.iloc[-1]['close'] if not df.empty else 0
+        if current_price == 0:
+            logger.error(f"Current price is 0 for {symbol}")
+            return high_prob_setups
+        
         # Filter signals by strength - use a lower threshold to get more signals
         strong_signals = [s for s in signals if s.get('strength', 0) >= 60]
         
@@ -183,9 +194,6 @@ class CombinedStrategy(Strategy):
         # Group signals by type
         bullish_signals = [s for s in strong_signals if s.get('type') == 'bullish' or s.get('direction') == 'BUY']
         bearish_signals = [s for s in strong_signals if s.get('type') == 'bearish' or s.get('direction') == 'SELL']
-        
-        # Current price
-        current_price = df.iloc[-1]['close'] if not df.empty else 0
         
         # Find key levels from SMC and ICT
         key_levels = self._extract_key_levels(df)
@@ -209,12 +217,16 @@ class CombinedStrategy(Strategy):
                 resistances = [{'type': 'resistance', 'price': recent_high * 1.01, 'strength': 60}]
             
             # Create multiple trade setups with different risk-reward ratios
-            for support in supports[:2]:  # Use top 2 supports
-                for resistance in resistances[:2]:  # Use top 2 resistances
+            for support in supports[:1]:  # Use top support
+                for resistance in resistances[:1]:  # Use top resistance
                     # Calculate entry, stop loss, and take profit
                     entry = current_price
                     stop_loss = support['price'] * 0.998  # Just below support
                     take_profit = resistance['price']
+                    
+                    # Ensure stop loss is below entry for BUY orders
+                    if stop_loss >= entry:
+                        stop_loss = entry * 0.99  # Default to 1% below entry
                     
                     # Calculate risk-reward ratio
                     risk = entry - stop_loss
@@ -257,12 +269,16 @@ class CombinedStrategy(Strategy):
                 supports = [{'type': 'support', 'price': recent_low * 0.999, 'strength': 60}]
             
             # Create multiple trade setups with different risk-reward ratios
-            for resistance in resistances[:2]:  # Use top 2 resistances
-                for support in supports[:2]:  # Use top 2 supports
+            for resistance in resistances[:1]:  # Use top resistance
+                for support in supports[:1]:  # Use top support
                     # Calculate entry, stop loss, and take profit
                     entry = current_price
                     stop_loss = resistance['price'] * 1.002  # Just above resistance
                     take_profit = support['price']
+                    
+                    # Ensure stop loss is above entry for SELL orders
+                    if stop_loss <= entry:
+                        stop_loss = entry * 1.01  # Default to 1% above entry
                     
                     # Calculate risk-reward ratio
                     risk = stop_loss - entry
@@ -286,12 +302,333 @@ class CombinedStrategy(Strategy):
                             'signals': [s.get('description', '') for s in bearish_signals[:3]]
                         })
         
-        # Sort setups by risk-reward ratio
+        # Sort setups by risk-reward ratio and limit to top 2
         high_prob_setups.sort(key=lambda x: x.get('risk_reward', 0), reverse=True)
-        
-        return high_prob_setups
+        return high_prob_setups[:2]  # Return maximum 2 setups
 
-    
+    def analyze_with_htf_context(self, symbol: str, timeframes: List[str]) -> Dict:
+        """
+        Analyze a symbol across multiple timeframes to identify HTF direction and POIs
+        
+        Args:
+            symbol (str): Trading symbol
+            timeframes (list): List of timeframes to analyze, from highest to lowest
+            
+        Returns:
+            dict: Analysis results with HTF context
+        """
+        results = {
+            'symbol': symbol,
+            'htf_bias': 'neutral',
+            'key_levels': [],
+            'poi': [],
+            'ltf_entries': []
+        }
+        
+        # Get data for each timeframe
+        data = {}
+        for tf in timeframes:
+            try:
+                df = self.data_processor.get_data(symbol, tf)
+                if df is not None and not df.empty:
+                    data[tf] = df
+            except Exception as e:
+                logger.error(f"Error getting data for {symbol} {tf}: {e}")
+        
+        if not data:
+            logger.error(f"No data available for {symbol} across any timeframes")
+            return results
+        
+        # Analyze HTF first (highest timeframe)
+        htf = timeframes[0]
+        if htf in data:
+            htf_analysis = self.analyze(data[htf], symbol, htf)
+            results['htf_bias'] = htf_analysis.get('bias', 'neutral')
+            
+            # Extract key levels from HTF
+            htf_levels = self._extract_key_levels(data[htf])
+            for level in htf_levels:
+                results['key_levels'].append({
+                    'timeframe': htf,
+                    'type': level['type'],
+                    'price': level['price'],
+                    'strength': level.get('strength', 50)
+                })
+            
+            # Extract POIs from HTF
+            htf_poi = self._identify_points_of_interest(data[htf], htf_analysis)
+            for poi in htf_poi:
+                results['poi'].append({
+                    'timeframe': htf,
+                    'type': poi['type'],
+                    'price': poi['price'],
+                    'strength': poi.get('strength', 50),
+                    'description': poi.get('description', '')
+                })
+        
+        # Analyze LTF for entries
+        for tf in timeframes[1:]:  # Skip the HTF
+            if tf in data:
+                ltf_analysis = self.analyze(data[tf], symbol, tf)
+                
+                # Find entries that align with HTF bias and POIs
+                for setup in ltf_analysis.get('trade_setups', []):
+                    # Check if setup aligns with HTF bias
+                    if (results['htf_bias'] == 'bullish' and setup.get('direction') == 'BUY') or \
+                    (results['htf_bias'] == 'bearish' and setup.get('direction') == 'SELL') or \
+                    results['htf_bias'] == 'neutral':
+                        
+                        # Check if setup aligns with POIs
+                        aligned_with_poi = self._check_alignment_with_poi(setup, results['poi'])
+                        
+                        if aligned_with_poi:
+                            setup['timeframe'] = tf
+                            setup['aligned_with_htf'] = True
+                            setup['aligned_with_poi'] = True
+                            results['ltf_entries'].append(setup)
+        
+        # Sort entries by risk-reward ratio
+        results['ltf_entries'].sort(key=lambda x: x.get('risk_reward', 0), reverse=True)
+        
+        # Limit to top 2 entries
+        results['ltf_entries'] = results['ltf_entries'][:2]
+        
+        return results
+
+    def _identify_points_of_interest(self, df: pd.DataFrame, analysis: Dict) -> List[Dict]:
+        """
+        Identify Points of Interest (POI) from price data
+        
+        Args:
+            df (pd.DataFrame): OHLCV data
+            analysis (dict): Analysis results
+            
+        Returns:
+            list: Points of Interest
+        """
+        poi = []
+        
+        # Extract order blocks
+        order_blocks = self._identify_order_blocks(df)
+        for ob in order_blocks:
+            poi.append({
+                'type': 'order_block',
+                'subtype': ob['type'],  # bullish or bearish
+                'price': ob['price'],
+                'high': ob.get('high', ob['price']),
+                'low': ob.get('low', ob['price']),
+                'strength': 80,  # Order blocks are strong POIs
+                'description': f"{'Bullish' if ob['type'] == 'bullish' else 'Bearish'} Order Block"
+            })
+        
+        # Extract fair value gaps
+        fvgs = self._identify_fair_value_gaps(df)
+        for fvg in fvgs:
+            poi.append({
+                'type': 'fair_value_gap',
+                'subtype': fvg['type'],  # bullish or bearish
+                'price': fvg['price'],
+                'top': fvg.get('top', fvg['price']),
+                'bottom': fvg.get('bottom', fvg['price']),
+                'strength': 75,  # FVGs are strong POIs
+                'description': f"{'Bullish' if fvg['type'] == 'bullish' else 'Bearish'} Fair Value Gap"
+            })
+        
+        # Extract liquidity levels
+        liquidity_levels = self._identify_liquidity_levels(df)
+        for ll in liquidity_levels:
+            poi.append({
+                'type': 'liquidity',
+                'subtype': ll['type'],  # buy_side_liquidity or sell_side_liquidity
+                'price': ll['price'],
+                'strength': ll.get('strength', 70),
+                'description': f"{'Buy-side' if ll['type'] == 'buy_side_liquidity' else 'Sell-side'} Liquidity"
+            })
+        
+        # Extract key support/resistance levels
+        key_levels = self.technical_analyzer.identify_key_levels(df) if hasattr(self, 'technical_analyzer') else []
+        for level in key_levels:
+            poi.append({
+                'type': level['type'],  # support or resistance
+                'price': level['price'],
+                'strength': level.get('strength', 65),
+                'description': f"{level['type'].capitalize()} Level"
+            })
+        
+        # Sort POIs by strength
+        poi.sort(key=lambda x: x.get('strength', 0), reverse=True)
+        
+        return poi
+
+    def generate_trade_setups_with_htf(self, symbol: str, timeframes: List[str]) -> List[Dict]:
+        """
+        Generate trade setups with Higher Timeframe (HTF) context
+        
+        Args:
+            symbol (str): Trading symbol
+            timeframes (list): List of timeframes to analyze, from highest to lowest
+            
+        Returns:
+            list: Trade setups with HTF context
+        """
+        # Analyze with HTF context
+        htf_analysis = self.analyze_with_htf_context(symbol, timeframes)
+        
+        # If we have entries aligned with HTF, return those
+        if htf_analysis['ltf_entries']:
+            return htf_analysis['ltf_entries']
+        
+        # Otherwise, generate setups based on HTF bias and POIs
+        htf_bias = htf_analysis['htf_bias']
+        poi_list = htf_analysis['poi']
+        
+        # Get data for the lowest timeframe
+        ltf = timeframes[-1]
+        try:
+            df = self.data_processor.get_data(symbol, ltf)
+            if df is None or df.empty:
+                logger.error(f"No data available for {symbol} on {ltf}")
+                return []
+        except Exception as e:
+            logger.error(f"Error getting data for {symbol} {ltf}: {e}")
+            return []
+        
+        # Generate signals for LTF
+        signals = self.generate_signals(symbol, df, ltf)
+        
+        # Filter signals based on HTF bias
+        if htf_bias == 'bullish':
+            filtered_signals = [s for s in signals if s.get('direction', '') == 'BUY' or s.get('type', '') == 'bullish']
+        elif htf_bias == 'bearish':
+            filtered_signals = [s for s in signals if s.get('direction', '') == 'SELL' or s.get('type', '') == 'bearish']
+        else:
+            filtered_signals = signals
+        
+        # Current price
+        current_price = df.iloc[-1]['close'] if not df.empty else 0
+        
+        # Create trade setups
+        trade_setups = []
+        
+        # For bullish bias
+        if htf_bias == 'bullish' or htf_bias == 'neutral':
+            # Find support POIs for stop loss
+            support_pois = [p for p in poi_list if p['type'] in ['support', 'order_block', 'fair_value_gap'] 
+                            and p['price'] < current_price]
+            
+            # If no support POIs, use recent lows
+            if not support_pois:
+                recent_low = df['low'].iloc[-20:].min()
+                support_pois = [{'type': 'support', 'price': recent_low, 'strength': 60}]
+            
+            # Find resistance POIs for take profit
+            resistance_pois = [p for p in poi_list if p['type'] in ['resistance', 'liquidity'] 
+                            and p['price'] > current_price]
+            
+            # If no resistance POIs, use recent highs
+            if not resistance_pois:
+                recent_high = df['high'].iloc[-20:].max()
+                resistance_pois = [{'type': 'resistance', 'price': recent_high * 1.01, 'strength': 60}]
+            
+            # Create bullish setups
+            for support in support_pois[:1]:  # Use top support
+                for resistance in resistance_pois[:1]:  # Use top resistance
+                    # Calculate entry, stop loss, and take profit
+                    entry = current_price
+                    stop_loss = support['price'] * 0.998  # Just below support
+                    take_profit = resistance['price']
+                    
+                    # Ensure stop loss is below entry for BUY orders
+                    if stop_loss >= entry:
+                        stop_loss = entry * 0.99  # Default to 1% below entry
+                    
+                    # Calculate risk-reward ratio
+                    risk = entry - stop_loss
+                    reward = take_profit - entry
+                    risk_reward = reward / risk if risk > 0 else 0
+                    
+                    # Only include setups with RR >= 2
+                    if risk_reward >= 2:
+                        trade_setups.append({
+                            'symbol': symbol,
+                            'direction': 'BUY',
+                            'entry_price': entry,
+                            'stop_loss': stop_loss,
+                            'take_profit': take_profit,
+                            'risk_reward': risk_reward,
+                            'strength': 80,  # High strength due to HTF alignment
+                            'timeframe': ltf,
+                            'htf_bias': htf_bias,
+                            'reason': (f"Bullish setup aligned with {htf_bias} HTF bias. "
+                                    f"RR: {risk_reward:.2f}. "
+                                    f"Stop loss at {support['type']} ({stop_loss:.5f}), "
+                                    f"Take profit at {resistance['type']} ({take_profit:.5f})"),
+                            'aligned_with_htf': True
+                        })
+        
+        # For bearish bias
+        if htf_bias == 'bearish' or htf_bias == 'neutral':
+            # Find resistance POIs for stop loss
+            resistance_pois = [p for p in poi_list if p['type'] in ['resistance', 'order_block', 'fair_value_gap'] 
+                            and p['price'] > current_price]
+            
+            # If no resistance POIs, use recent highs
+            if not resistance_pois:
+                recent_high = df['high'].iloc[-20:].max()
+                resistance_pois = [{'type': 'resistance', 'price': recent_high, 'strength': 60}]
+            
+            # Find support POIs for take profit
+            support_pois = [p for p in poi_list if p['type'] in ['support', 'liquidity'] 
+                            and p['price'] < current_price]
+            
+            # If no support POIs, use recent lows
+            if not support_pois:
+                recent_low = df['low'].iloc[-20:].min()
+                support_pois = [{'type': 'support', 'price': recent_low * 0.999, 'strength': 60}]
+            
+            # Create bearish setups
+            for resistance in resistance_pois[:1]:  # Use top resistance
+                for support in support_pois[:1]:  # Use top support
+                    # Calculate entry, stop loss, and take profit
+                    entry = current_price
+                    stop_loss = resistance['price'] * 1.002  # Just above resistance
+                    take_profit = support['price']
+                    
+                    # Ensure stop loss is above entry for SELL orders
+                    if stop_loss <= entry:
+                        stop_loss = entry * 1.01  # Default to 1% above entry
+                    
+                    # Calculate risk-reward ratio
+                    risk = stop_loss - entry
+                    reward = entry - take_profit
+                    risk_reward = reward / risk if risk > 0 else 0
+                    
+                    # Only include setups with RR >= 2
+                    if risk_reward >= 2:
+                        trade_setups.append({
+                            'symbol': symbol,
+                            'direction': 'SELL',
+                            'entry_price': entry,
+                            'stop_loss': stop_loss,
+                            'take_profit': take_profit,
+                            'risk_reward': risk_reward,
+                            'strength': 80,  # High strength due to HTF alignment
+                            'timeframe': ltf,
+                            'htf_bias': htf_bias,
+                            'reason': (f"Bearish setup aligned with {htf_bias} HTF bias. "
+                                    f"RR: {risk_reward:.2f}. "
+                                    f"Stop loss at {resistance['type']} ({stop_loss:.5f}), "
+                                    f"Take profit at {support['type']} ({take_profit:.5f})"),
+                            'aligned_with_htf': True
+                        })
+        
+        # Sort setups by risk-reward ratio
+        trade_setups.sort(key=lambda x: x.get('risk_reward', 0), reverse=True)
+        
+        # Return top 2 setups
+        return trade_setups[:2]
+
+
     def _extract_key_levels(self, df: pd.DataFrame) -> List[Dict]:
         """
         Extract key levels from SMC and technical analysis

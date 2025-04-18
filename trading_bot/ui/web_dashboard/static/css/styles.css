@@ -62,7 +62,8 @@ body {
     transition: all 0.3s ease;
 }
 
-.nav-item:hover, .nav-item.active {
+.nav-item:hover,
+.nav-item.active {
     background-color: rgba(255, 255, 255, 0.1);
     color: white;
 }
@@ -106,14 +107,18 @@ body {
 }
 
 /* Dashboard Grid */
-.dashboard-grid, .performance-grid, .backtesting-grid {
+.dashboard-grid,
+.performance-grid,
+.backtesting-grid {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
     gap: 20px;
 }
 
-.dashboard-grid .card:first-child, .dashboard-grid .card:nth-child(2),
-.performance-grid .card:first-child, .performance-grid .card:nth-child(2),
+.dashboard-grid .card:first-child,
+.dashboard-grid .card:nth-child(2),
+.performance-grid .card:first-child,
+.performance-grid .card:nth-child(2),
 .backtesting-grid .card:first-child {
     grid-column: span 2;
 }
@@ -156,7 +161,8 @@ table {
     border-collapse: collapse;
 }
 
-th, td {
+th,
+td {
     padding: 12px 15px;
     text-align: left;
     border-bottom: 1px solid var(--border-color);
@@ -182,7 +188,8 @@ label {
     font-weight: 500;
 }
 
-input, select {
+input,
+select {
     width: 100%;
     padding: 10px;
     border: 1px solid var(--border-color);
@@ -253,26 +260,28 @@ input, select {
         transform: translateX(-100%);
         transition: transform 0.3s ease;
     }
-    
+
     .sidebar.active {
         transform: translateX(0);
     }
-    
+
     .mobile-menu-toggle {
         display: block;
     }
-    
+
     .main-content {
         margin-left: 0;
         width: 100%;
     }
-    
+
     .nav-item {
         padding: 10px 15px;
     }
-    
-    .dashboard-grid .card:first-child, .dashboard-grid .card:nth-child(2),
-    .performance-grid .card:first-child, .performance-grid .card:nth-child(2),
+
+    .dashboard-grid .card:first-child,
+    .dashboard-grid .card:nth-child(2),
+    .performance-grid .card:first-child,
+    .performance-grid .card:nth-child(2),
     .backtesting-grid .card:first-child {
         grid-column: span 1;
     }
