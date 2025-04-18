@@ -1,1 +1,58 @@
+# Virtual environments
+venv/
 stable_venv/
+*venv/
+env/
+.env
+
+# Python cache files
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Distribution / packaging
+dist/
+build/
+*.egg-info/
+
+# Data files (consider if you really need these in version control)
+*.csv
+data/*.csv
+charts/**/*.csv
+
+# Database files
+*.db
+*.sqlite
+*.sqlite3
+
+# Logs
+logs/
+*.log
+
+# IDE specific files
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS specific files
+.DS_Store
+Thumbs.db
+
+# Credentials and secrets
+**/credentials.py
+**/settings.py
+config/credentials.py
+
+# Temporary files
+*.tmp
+*.bak
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# ngrok configuration
+ngrok.yml
