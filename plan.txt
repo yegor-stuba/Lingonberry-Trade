@@ -1,4 +1,9 @@
-## goal now, it to implement the data fetching, some analytics, test them, simlpe ui, then launch the bot and test it there. ##
+## goal now, is to update the bot to handle the journal properly (to add the function to redirect to the journal) ask for the account info to use it then with analysis and journal ##
+so that the bot gets the account details:
+account size, risk per trade
+then once suggesting trade and ask if we choose to accept, include the potential gain in case of a win/loss
+so that we coudl keep track of it in the journal
+
 
 Implementation Plan
 First Phase:
@@ -18,7 +23,60 @@ Optimize strategies
 
 
 ##########################################################
-this is great, thank you. could you please check plan.txt and structure.txt 
-suggest what to do next as per goal?
 
-let me know if you need anything from my side.
+
+Files That Need Attention
+Based on the analysis, these files need to be checked or modified:
+
+trading_bot/ui/telegram_bot.py:
+
+Fix the journal command to handle URLs properly
+Ensure it doesn't use localhost URLs in Telegram inline buttons
+trading_bot/config/settings.py:
+
+Update DASHBOARD_URL to use ngrok or a public URL instead of localhost
+trading_bot/journal/trade_journal.py:
+
+Implement or fix functionality for tracking trades
+Add account information handling
+trading_bot/main.py:
+
+Ensure proper initialization of all components
+Add ngrok setup for exposing the dashboard
+Questions I Have
+About the Journal Functionality:
+
+What specific information do you want to track in the journal?
+Do you want to implement risk management calculations based on account size?
+About the Error in qc.txt:
+
+Is the ngrok setup working correctly? The error suggests the bot is still using localhost URLs.
+About the Data Sources:
+
+Are you experiencing any issues with the cTrader or Binance connections?
+Do you need to implement additional data providers?
+About the Deployment:
+
+Are you planning to deploy this on a server or run it locally?
+Do you need help setting up continuous operation?
+Recommendations
+Fix the Journal URL Issue:
+
+Modify the TelegramBot class to use ngrok URLs instead of localhost
+In trading_bot/main.py, ensure the ngrok URL is passed to the TelegramBot
+Implement Account Management:
+
+Add functionality to store and retrieve account details
+Implement risk calculation based on account size and risk percentage
+Enhance Error Handling:
+
+Add more robust error handling for API connections
+Implement fallback mechanisms when data sources are unavailable
+Complete the Journal Implementation:
+
+Finish the trade journal functionality as outlined in plan.txt
+Add performance metrics calculation
+Testing:
+
+Create comprehensive tests for each component
+Test the integration between components

@@ -105,74 +105,95 @@ class SMCAnalyzer:
         Returns:
             dict: Market structure details
         """
-        # Simple trend identification based on moving averages
-        df['ma20'] = df['close'].rolling(window=20).mean()
-        df['ma50'] = df['close'].rolling(window=50).mean()
-        
-        # Determine trend based on MA relationship
-        current_close = df['close'].iloc[-1]
-        current_ma20 = df['ma20'].iloc[-1]
-        current_ma50 = df['ma50'].iloc[-1]
-        
-        if current_ma20 > current_ma50 and current_close > current_ma20:
-            trend = 'bullish'
-        elif current_ma20 < current_ma50 and current_close < current_ma20:
-            trend = 'bearish'
-        else:
-            trend = 'neutral'
-        
-        # Find swing highs and lows (simple method)
-        swing_highs = []
-        swing_lows = []
-        
-        # Use a window of 5 candles to identify swings
-        window = 5
-        for i in range(window, len(df) - window):
-            # Check for swing high
-            if all(df['high'].iloc[i] > df['high'].iloc[i-j] for j in range(1, window+1)) and \
-               all(df['high'].iloc[i] > df['high'].iloc[i+j] for j in range(1, window+1)):
-                swing_highs.append({
-                    'index': i,
-                    'price': df['high'].iloc[i],
-                    'date': df.index[i] if hasattr(df.index, '__getitem__') else None
-                })
+        try:
+            # Check for empty dataframe
+            if df is None or df.empty or len(df) < 50:  # Need enough data for analysis
+                return {
+                    'trend': 'neutral',
+                    'structure': 'undefined',
+                    'swing_highs': [],
+                    'swing_lows': [],
+                    'hh_hl_ll_lh': {'higher_highs': [], 'higher_lows': [], 'lower_lows': [], 'lower_highs': []}
+                }
+
+            # Simple trend identification based on moving averages
+            df['ma20'] = df['close'].rolling(window=20).mean()
+            df['ma50'] = df['close'].rolling(window=50).mean()
             
-            # Check for swing low
-            if all(df['low'].iloc[i] < df['low'].iloc[i-j] for j in range(1, window+1)) and \
-               all(df['low'].iloc[i] < df['low'].iloc[i+j] for j in range(1, window+1)):
-                swing_lows.append({
-                    'index': i,
-                    'price': df['low'].iloc[i],
-                    'date': df.index[i] if hasattr(df.index, '__getitem__') else None
-                })
-        
-        # Identify Higher Highs (HH), Higher Lows (HL), Lower Lows (LL), Lower Highs (LH)
-        hh_hl_ll_lh = self._identify_hh_hl_ll_lh(swing_highs, swing_lows)
-        
-        # Determine market structure based on HH, HL, LL, LH
-        if len(swing_highs) >= 2 and len(swing_lows) >= 2:
-            recent_swing_highs = sorted(swing_highs[-2:], key=lambda x: x['index'])
-            recent_swing_lows = sorted(swing_lows[-2:], key=lambda x: x['index'])
+            # Determine trend based on MA relationship
+            current_close = df['close'].iloc[-1]
+            current_ma20 = df['ma20'].iloc[-1]
+            current_ma50 = df['ma50'].iloc[-1]
             
-            higher_highs = recent_swing_highs[1]['price'] > recent_swing_highs[0]['price']
-            higher_lows = recent_swing_lows[1]['price'] > recent_swing_lows[0]['price']
-            
-            if higher_highs and higher_lows:
-                structure = 'uptrend'
-            elif not higher_highs and not higher_lows:
-                structure = 'downtrend'
+            if current_ma20 > current_ma50 and current_close > current_ma20:
+                trend = 'bullish'
+            elif current_ma20 < current_ma50 and current_close < current_ma20:
+                trend = 'bearish'
             else:
-                structure = 'consolidation'
-        else:
-            structure = 'undefined'
-        
-        return {
-            'trend': trend,
-            'structure': structure,
-            'swing_highs': swing_highs[-5:] if swing_highs else [],  # Last 5 swing highs
-            'swing_lows': swing_lows[-5:] if swing_lows else [],     # Last 5 swing lows
-            'hh_hl_ll_lh': hh_hl_ll_lh
-        }
+                trend = 'neutral'
+            
+            # Find swing highs and lows (simple method)
+            swing_highs = []
+            swing_lows = []
+            
+            # Use a window of 5 candles to identify swings
+            window = 5
+            for i in range(window, len(df) - window):
+                # Check for swing high
+                if all(df['high'].iloc[i] > df['high'].iloc[i-j] for j in range(1, window+1)) and \
+                   all(df['high'].iloc[i] > df['high'].iloc[i+j] for j in range(1, window+1)):
+                    swing_highs.append({
+                        'index': i,
+                        'price': df['high'].iloc[i],
+                        'date': df.index[i] if hasattr(df.index, '__getitem__') else None
+                    })
+                
+                # Check for swing low
+                if all(df['low'].iloc[i] < df['low'].iloc[i-j] for j in range(1, window+1)) and \
+                   all(df['low'].iloc[i] < df['low'].iloc[i+j] for j in range(1, window+1)):
+                    swing_lows.append({
+                        'index': i,
+                        'price': df['low'].iloc[i],
+                        'date': df.index[i] if hasattr(df.index, '__getitem__') else None
+                    })
+            
+            # Identify Higher Highs (HH), Higher Lows (HL), Lower Lows (LL), Lower Highs (LH)
+            hh_hl_ll_lh = self._identify_hh_hl_ll_lh(swing_highs, swing_lows)
+            
+            # Determine market structure based on HH, HL, LL, LH
+            if len(swing_highs) >= 2 and len(swing_lows) >= 2:
+                recent_swing_highs = sorted(swing_highs[-2:], key=lambda x: x['index'])
+                recent_swing_lows = sorted(swing_lows[-2:], key=lambda x: x['index'])
+                
+                higher_highs = recent_swing_highs[1]['price'] > recent_swing_highs[0]['price']
+                higher_lows = recent_swing_lows[1]['price'] > recent_swing_lows[0]['price']
+                
+                if higher_highs and higher_lows:
+                    structure = 'uptrend'
+                elif not higher_highs and not higher_lows:
+                    structure = 'downtrend'
+                else:
+                    structure = 'consolidation'
+            else:
+                structure = 'undefined'
+            
+            return {
+                'trend': trend,
+                'structure': structure,
+                'swing_highs': swing_highs[-5:] if swing_highs else [],  # Last 5 swing highs
+                'swing_lows': swing_lows[-5:] if swing_lows else [],     # Last 5 swing lows
+                'hh_hl_ll_lh': hh_hl_ll_lh
+            }
+
+        except Exception as e:
+            logger.error(f"Error identifying market structure: {e}")
+            return {
+                'trend': 'neutral',
+                'structure': 'undefined',
+                'swing_highs': [],
+                'swing_lows': [],
+                'hh_hl_ll_lh': {'higher_highs': [], 'higher_lows': [], 'lower_lows': [], 'lower_highs': []}
+            }
     
     def _identify_hh_hl_ll_lh(self, swing_highs: List[Dict], swing_lows: List[Dict]) -> Dict:
         """
@@ -1660,6 +1681,16 @@ class SMCAnalyzer:
         Returns:
             tuple: (take_profit_price, risk_reward_ratio)
         """
+        # Handle case where df is None
+        if df is None:
+            # Calculate a simple take profit based on risk-reward
+            risk = abs(entry_price - stop_loss)
+            if direction.lower() in ['buy', 'long']:
+                take_profit = entry_price + (risk * min_rr)
+            else:
+                take_profit = entry_price - (risk * min_rr)
+            return take_profit, min_rr
+        
         # Calculate risk in price points
         if direction.lower() == 'buy':
             risk = abs(entry_price - stop_loss)
@@ -1713,37 +1744,3 @@ class SMCAnalyzer:
             take_profit = entry_price - (risk * min_rr)
         
         return take_profit, min_rr
-
-    def calculate_stop_loss(self, entry_price, direction, order_block=None, buffer_pips=10):
-        """Calculate stop loss with buffer from order block"""
-        if order_block and 'price_low' in order_block and 'price_high' in order_block:
-            if direction == 'LONG':
-                # For long positions, place SL below the order block with buffer
-                stop_level = order_block['price_low'] - self._convert_pips_to_price(buffer_pips)
-            else:
-                # For short positions, place SL above the order block with buffer
-                stop_level = order_block['price_high'] + self._convert_pips_to_price(buffer_pips)
-            return stop_level
-        else:
-            # Fallback to default calculation if no order block
-            if direction == 'LONG':
-                return entry_price * 0.99  # Default 1% stop
-            else:
-                return entry_price * 1.01  # Default 1% stop
-
-    def _convert_pips_to_price(self, pips, symbol=None):
-        """Convert pips to actual price movement based on symbol"""
-        # For forex pairs, 1 pip is typically 0.0001
-        if symbol and symbol in ['EURUSD', 'GBPUSD', 'AUDUSD']:
-            return pips * 0.0001
-        # For JPY pairs, 1 pip is 0.01
-        elif symbol and 'JPY' in symbol:
-            return pips * 0.01
-        # For gold, 1 pip might be 0.1
-        elif symbol == 'XAUUSD':
-            return pips * 0.1
-        # For crypto, depends on the price magnitude
-        elif symbol and ('BTC' in symbol or 'ETH' in symbol):
-            return pips * 1.0  # Adjust based on your definition of a "pip" for crypto
-        else:
-            return pips * 0.0001  # Default

@@ -1,3 +1,12 @@
+(stable_venv) yegor@tourist trading bot 2 % python -m pip install pyngrok
+Collecting pyngrok
+  Downloading pyngrok-7.2.4-py3-none-any.whl.metadata (8.7 kB)
+Requirement already satisfied: PyYAML>=5.1 in ./stable_venv/lib/python3.10/site-packages (from pyngrok) (6.0.2)
+Downloading pyngrok-7.2.4-py3-none-any.whl (23 kB)
+Installing collected packages: pyngrok
+Successfully installed pyngrok-7.2.4
+(stable_venv) yegor@tourist trading bot 2 % pip list | grep pyngrok
+pyngrok             7.2.4
 (stable_venv) yegor@tourist trading bot 2 % tree -L 3
 .
 ├── RAED.md
@@ -102,7 +111,9 @@
 ├── csample.txt
 ├── data
 │   ├── BTCUSD_H1.csv
+│   ├── BTCUSD_H1_live.csv
 │   ├── BTCUSD_M1.csv
+│   ├── BTCUSD_M1_live.csv
 │   ├── BTCUSD_M5.csv
 │   ├── BTCUSD_M5_live.csv
 │   ├── EURUSD_H1.csv
@@ -112,17 +123,26 @@
 │   ├── EURUSD_M5.csv
 │   ├── GBPJPY_M15.csv
 │   ├── GBPJPY_M30.csv
+│   ├── GBPUSD_M1.csv
+│   ├── GBPUSD_M15.csv
+│   ├── GBPUSD_M30.csv
+│   ├── GBPUSD_M5.csv
 │   ├── NAS100_H1.csv
+│   ├── USDCAD_M15.csv
+│   ├── USDJPY_M15.csv
 │   ├── USDJPY_M30.csv
+│   ├── USTEC_M30.csv
 │   ├── XAUUSD_H1.csv
-│   └── XAUUSD_M15.csv
-├── descr.txt
+│   ├── XAUUSD_M15.csv
+│   └── trade_journal.db
 ├── journal
 │   └── trade_journal.json
+├── ngrok.yml
 ├── plan.txt
 ├── qc.txt
 ├── scripts
-│   └── fetch_data.py
+│   ├── fetch_data.py
+│   └── run_combined_backtest.py
 ├── setup.py
 ├── stable_venv
 │   ├── bin
@@ -145,6 +165,7 @@
 │   │   ├── huggingface-cli
 │   │   ├── isympy
 │   │   ├── mailmail
+│   │   ├── ngrok
 │   │   ├── normalizer
 │   │   ├── numpy-config
 │   │   ├── pip
@@ -155,6 +176,7 @@
 │   │   ├── pyftmerge
 │   │   ├── pyftsubset
 │   │   ├── pyhtmlizer
+│   │   ├── pyngrok
 │   │   ├── pytest
 │   │   ├── python -> python3.10
 │   │   ├── python3 -> python3.10
@@ -178,16 +200,22 @@
 │       └── man
 ├── structure.txt
 ├── tests
+│   ├── test_combined_strategy.py
+│   ├── test_combined_strategy_implementation.py
+│   ├── test_credentials.py
 │   ├── test_ctrader.py
 │   ├── test_ctrader_data_enhanced.py
 │   ├── test_data_processor.py
 │   ├── test_ict_strategy.py
+│   ├── test_sentiment_analyzer.py
 │   ├── test_smc_strategy.py
+│   ├── test_technical_analyzer.py
 │   └── test_trade_suggestion.py
 ├── trading_bot
 │   ├── __init__.py
 │   ├── __pycache__
-│   │   └── __init__.cpython-310.pyc
+│   │   ├── __init__.cpython-310.pyc
+│   │   └── main.cpython-310.pyc
 │   ├── analysis
 │   │   ├── __init__.py
 │   │   ├── __pycache__
@@ -197,6 +225,7 @@
 │   │   └── technical.py
 │   ├── backtesting
 │   │   ├── __init__.py
+│   │   ├── __pycache__
 │   │   ├── backtest.py
 │   │   ├── backtest_visualization.py
 │   │   ├── cli.py
@@ -225,9 +254,12 @@
 │   ├── requirements.txt
 │   ├── risk
 │   │   ├── __init__.py
+│   │   ├── __pycache__
 │   │   └── management.py
 │   ├── strategy
+│   │   ├── __init__.py
 │   │   ├── __pycache__
+│   │   ├── combined_strategy.py
 │   │   ├── ict_strategy.py
 │   │   ├── signal_generator.py
 │   │   ├── smc_strategy.py
@@ -242,15 +274,7 @@
 │       ├── __pycache__
 │       ├── helpers.py
 │       └── visualization.py
-├── trading_bot.egg-info
-│   ├── PKG-INFO
-│   ├── SOURCES.txt
-│   ├── dependency_links.txt
-│   ├── requires.txt
-│   └── top_level.txt
-├── trading_bot.log
-├── updated_symbol_ids.py
-└── what_we_did.py
+└── trading_bot.log
 
-39 directories, 213 files
+40 directories, 227 files
 (stable_venv) yegor@tourist trading bot 2 % 

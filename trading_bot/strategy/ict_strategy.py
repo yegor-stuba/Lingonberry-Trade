@@ -150,8 +150,9 @@ class ICTStrategy(Strategy):
                         'buy',
                         min_rr=2.0
                     )
-                except (TypeError, AttributeError):
+                except (TypeError, AttributeError) as e:
                     # If the method fails, calculate a simple 1:2 risk-reward ratio
+                    logger.warning(f"Error finding optimal take profit: {e}. Using simple calculation.")
                     risk = current_price - stop_loss
                     take_profit = current_price + (risk * 2)
                     risk_reward = 2.0

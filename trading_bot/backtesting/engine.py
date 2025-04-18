@@ -15,7 +15,9 @@ from trading_bot.analysis.smc_analyzer import SMCAnalyzer
 from trading_bot.risk.management import RiskManager
 from trading_bot.config import settings
 from trading_bot.utils import helpers, visualization
-from trading_bot.data.provider_factory import DataProviderFactory
+from trading_bot.data.data_processor import DataProcessor
+from trading_bot.strategy.combined_strategy import CombinedStrategy
+
 
 logger = logging.getLogger(__name__)
 
@@ -26,9 +28,10 @@ class BacktestEngine:
     
     def __init__(self):
         """Initialize the backtest engine"""
-        self.data_provider_factory = DataProviderFactory()
+        self.data_processor = DataProcessor()
         self.smc_analyzer = SMCAnalyzer()
         self.risk_manager = RiskManager()
+        self.combined_strategy = CombinedStrategy()
         self.results = {}
         
     async def load_data(self, symbol: str, timeframe: str, period: str = '1y', market_type: str = 'forex') -> pd.DataFrame:
@@ -284,9 +287,246 @@ class BacktestEngine:
         Returns:
             tuple: (trades, equity)
         """
-        # Placeholder for combined strategy backtest
-        # This would combine both SMC and technical analysis
-        return [], [initial_capital]
+        # Initialize the combined strategy
+        combined_strategy = CombinedStrategy()
+        
+        # Initialize backtest variables
+        equity = [initial_capital]
+        trades = []
+        current_position = None
+        capital = initial_capital
+        
+        # Ensure DataFrame has datetime index
+        if not isinstance(df.index, pd.DatetimeIndex):
+            logger.warning("DataFrame index is not DatetimeIndex, attempting to convert")
+            try:
+                if 'datetime' in df.columns:
+                    df = df.set_index('datetime')
+                else:
+                    df = df.set_index(pd.DatetimeIndex(df.index))
+            except Exception as e:
+                logger.error(f"Failed to convert index to DatetimeIndex: {e}")
+                return [], [initial_capital]
+        
+        # Ensure column names are lowercase
+        df.columns = [col.lower() for col in df.columns]
+        
+        # Minimum required columns
+        required_cols = ['open', 'high', 'low', 'close', 'volume']
+        if not all(col in df.columns for col in required_cols):
+            logger.error(f"DataFrame missing required columns. Available: {df.columns.tolist()}")
+            return [], [initial_capital]
+        
+        # Iterate through each candle (starting from enough history for indicators)
+        start_idx = 200  # Allow enough data for indicators
+        
+        for i in range(start_idx, len(df)):
+            # Get current date and price
+            current_date = df.index[i]
+            current_price = df.iloc[i]['close']
+            
+            # Update equity
+            if current_position:
+                # Calculate current value of position
+                if current_position['type'] == 'BUY':
+                    position_value = current_position['size'] * current_price
+                else:  # SELL
+                    position_value = current_position['size'] * (2 * current_position['entry'] - current_price)
+                
+                # Update equity with position value
+                equity.append(capital + position_value - current_position['value'])
+            else:
+                equity.append(capital)
+            
+            # Check for exit conditions if in a position
+            if current_position:
+                # For long positions
+                if current_position['type'] == 'BUY':
+                    # Check if take profit hit
+                    if df.iloc[i]['high'] >= current_position['take_profit']:
+                        # Calculate profit
+                        profit = current_position['size'] * (current_position['take_profit'] - current_position['entry'])
+                        capital += profit
+                        
+                        # Record trade
+                        trades.append({
+                            'entry_date': current_position['date'],
+                            'exit_date': current_date,
+                            'type': current_position['type'],
+                            'entry': current_position['entry'],
+                            'exit': current_position['take_profit'],
+                            'size': current_position['size'],
+                            'profit': profit,
+                            'profit_pct': (profit / current_position['value']) * 100,
+                            'exit_reason': 'take_profit'
+                        })
+                        
+                        # Reset position
+                        current_position = None
+                        continue
+                    
+                    # Check if stop loss hit
+                    if df.iloc[i]['low'] <= current_position['stop_loss']:
+                        # Calculate loss
+                        loss = current_position['size'] * (current_position['stop_loss'] - current_position['entry'])
+                        capital += loss
+                        
+                        # Record trade
+                        trades.append({
+                            'entry_date': current_position['date'],
+                            'exit_date': current_date,
+                            'type': current_position['type'],
+                            'entry': current_position['entry'],
+                            'exit': current_position['stop_loss'],
+                            'size': current_position['size'],
+                            'profit': loss,
+                            'profit_pct': (loss / current_position['value']) * 100,
+                            'exit_reason': 'stop_loss'
+                        })
+                        
+                        # Reset position
+                        current_position = None
+                        continue
+                
+                # For short positions
+                else:  # SELL
+                    # Check if take profit hit
+                    if df.iloc[i]['low'] <= current_position['take_profit']:
+                        # Calculate profit
+                        profit = current_position['size'] * (current_position['entry'] - current_position['take_profit'])
+                        capital += profit
+                        
+                        # Record trade
+                        trades.append({
+                            'entry_date': current_position['date'],
+                            'exit_date': current_date,
+                            'type': current_position['type'],
+                            'entry': current_position['entry'],
+                            'exit': current_position['take_profit'],
+                            'size': current_position['size'],
+                            'profit': profit,
+                            'profit_pct': (profit / current_position['value']) * 100,
+                            'exit_reason': 'take_profit'
+                        })
+                        
+                        # Reset position
+                        current_position = None
+                        continue
+                    
+                    # Check if stop loss hit
+                    if df.iloc[i]['high'] >= current_position['stop_loss']:
+                        # Calculate loss
+                        loss = current_position['size'] * (current_position['entry'] - current_position['stop_loss'])
+                        capital += loss
+                        
+                        # Record trade
+                        trades.append({
+                            'entry_date': current_position['date'],
+                            'exit_date': current_date,
+                            'type': current_position['type'],
+                            'entry': current_position['entry'],
+                            'exit': current_position['stop_loss'],
+                            'size': current_position['size'],
+                            'profit': loss,
+                            'profit_pct': (loss / current_position['value']) * 100,
+                            'exit_reason': 'stop_loss'
+                        })
+                        
+                        # Reset position
+                        current_position = None
+                        continue
+            
+            # Only look for new trades if not in a position
+            if not current_position:
+                # Get historical data up to current candle
+                historical_df = df.iloc[:i+1].copy()
+                
+                # Analyze with combined strategy
+                analysis = combined_strategy.analyze(historical_df, 'BACKTEST', 'BACKTEST')
+                
+                # Get trade setups
+                trade_setups = analysis.get('trade_setups', [])
+                
+                # Filter for high-quality setups (RR >= 3)
+                quality_setups = [setup for setup in trade_setups if setup.get('risk_reward', 0) >= 3]
+                
+                if quality_setups:
+                    # Take the highest RR setup
+                    setup = max(quality_setups, key=lambda x: x.get('risk_reward', 0))
+                    
+                    # Calculate position size based on risk
+                    risk_amount = capital * (risk_per_trade / 100)
+                    
+                    if setup['direction'] == 'BUY':
+                        # Calculate risk per unit
+                        risk_per_unit = setup['entry'] - setup['stop_loss']
+                        
+                        if risk_per_unit > 0:
+                            # Calculate position size
+                            position_size = risk_amount / risk_per_unit
+                            position_value = position_size * setup['entry']
+                            
+                            # Enter long position
+                            current_position = {
+                                'date': current_date,
+                                'type': 'BUY',
+                                'entry': setup['entry'],
+                                'stop_loss': setup['stop_loss'],
+                                'take_profit': setup['take_profit'],
+                                'size': position_size,
+                                'value': position_value,
+                                'risk': risk_amount
+                            }
+                    
+                    elif setup['direction'] == 'SELL':
+                        # Calculate risk per unit
+                        risk_per_unit = setup['stop_loss'] - setup['entry']
+                        
+                        if risk_per_unit > 0:
+                            # Calculate position size
+                            position_size = risk_amount / risk_per_unit
+                            position_value = position_size * setup['entry']
+                            
+                            # Enter short position
+                            current_position = {
+                                'date': current_date,
+                                'type': 'SELL',
+                                'entry': setup['entry'],
+                                'stop_loss': setup['stop_loss'],
+                                'take_profit': setup['take_profit'],
+                                'size': position_size,
+                                'value': position_value,
+                                'risk': risk_amount
+                            }
+        
+        # Close any open position at the end of the backtest
+        if current_position:
+            final_price = df.iloc[-1]['close']
+            
+            if current_position['type'] == 'BUY':
+                profit = current_position['size'] * (final_price - current_position['entry'])
+            else:  # SELL
+                profit = current_position['size'] * (current_position['entry'] - final_price)
+            
+            capital += profit
+            
+            # Record trade
+            trades.append({
+                'entry_date': current_position['date'],
+                'exit_date': df.index[-1],
+                'type': current_position['type'],
+                'entry': current_position['entry'],
+                'exit': final_price,
+                'size': current_position['size'],
+                'profit': profit,
+                'profit_pct': (profit / current_position['value']) * 100,
+                'exit_reason': 'end_of_test'
+            })
+            
+            # Update final equity
+            equity[-1] = capital
+        
+        return trades, equity
     
     def _calculate_performance_metrics(self, trades: List[Dict], equity: List[float], initial_capital: float) -> Dict:
         """
@@ -687,3 +927,381 @@ class BacktestEngine:
         plt.close(fig)
         
         return buf
+    async def run_multi_timeframe_backtest(self, symbol: str, timeframes: List[str], period: str = '1y',
+                                         market_type: str = 'forex', initial_capital: float = 10000.0,
+                                         risk_per_trade: float = 1.0) -> Dict:
+        """
+        Run a backtest using multi-timeframe analysis
+        
+        Args:
+            symbol (str): Trading symbol
+            timeframes (list): List of timeframes to analyze
+            period (str): Time period ('1m', '3m', '6m', '1y', '2y', '5y')
+            market_type (str): Market type ('forex', 'crypto', 'indices', 'metals')
+            initial_capital (float): Initial capital
+            risk_per_trade (float): Risk percentage per trade
+            
+        Returns:
+            dict: Backtest results
+        """
+        try:
+            # Load historical data for each timeframe
+            dfs = {}
+            for timeframe in timeframes:
+                df = await self.load_data(symbol, timeframe, period, market_type)
+                if df is not None and not df.empty:
+                    dfs[timeframe] = df
+            
+            if not dfs:
+                return {
+                    'success': False,
+                    'message': f"Failed to load data for {symbol} (any timeframe)"
+                }
+            
+            # Initialize combined strategy
+            combined_strategy = CombinedStrategy()
+            
+            # Initialize backtest variables
+            equity = [initial_capital]
+            trades = []
+            current_position = None
+            capital = initial_capital
+            
+            # Use the lowest timeframe for trade execution
+            execution_tf = min(timeframes, key=lambda tf: self._timeframe_to_minutes(tf))
+            execution_df = dfs[execution_tf]
+            
+            # Ensure DataFrame has datetime index
+            if not isinstance(execution_df.index, pd.DatetimeIndex):
+                logger.warning("DataFrame index is not DatetimeIndex, attempting to convert")
+                try:
+                    if 'datetime' in execution_df.columns:
+                        execution_df = execution_df.set_index('datetime')
+                    else:
+                        execution_df = execution_df.set_index(pd.DatetimeIndex(execution_df.index))
+                except Exception as e:
+                    logger.error(f"Failed to convert index to DatetimeIndex: {e}")
+                    return {
+                        'success': False,
+                        'message': f"Failed to process data for {symbol}"
+                    }
+            
+            # Ensure column names are lowercase
+            execution_df.columns = [col.lower() for col in execution_df.columns]
+            
+            # Minimum required columns
+            required_cols = ['open', 'high', 'low', 'close', 'volume']
+            if not all(col in execution_df.columns for col in required_cols):
+                logger.error(f"DataFrame missing required columns. Available: {execution_df.columns.tolist()}")
+                return {
+                    'success': False,
+                    'message': f"Missing required columns for {symbol}"
+                }
+            
+            # Iterate through each candle (starting from enough history for indicators)
+            start_idx = 200  # Allow enough data for indicators
+            
+            for i in range(start_idx, len(execution_df)):
+                # Get current date and price
+                current_date = execution_df.index[i]
+                current_price = execution_df.iloc[i]['close']
+                
+                # Update equity
+                if current_position:
+                    # Calculate current value of position
+                    if current_position['type'] == 'BUY':
+                        position_value = current_position['size'] * current_price
+                    else:  # SELL
+                        position_value = current_position['size'] * (2 * current_position['entry'] - current_price)
+                    
+                    # Update equity with position value
+                    equity.append(capital + position_value - current_position['value'])
+                else:
+                    equity.append(capital)
+                
+                # Check for exit conditions if in a position
+                if current_position:
+                    # For long positions
+                    if current_position['type'] == 'BUY':
+                        # Check if take profit hit
+                        if execution_df.iloc[i]['high'] >= current_position['take_profit']:
+                            # Calculate profit
+                            profit = current_position['size'] * (current_position['take_profit'] - current_position['entry'])
+                            capital += profit
+                            
+                            # Record trade
+                            trades.append({
+                                'entry_date': current_position['date'],
+                                'exit_date': current_date,
+                                'type': current_position['type'],
+                                'entry': current_position['entry'],
+                                'exit': current_position['take_profit'],
+                                'size': current_position['size'],
+                                'profit': profit,
+                                'profit_pct': (profit / current_position['value']) * 100,
+                                'exit_reason': 'take_profit'
+                            })
+                            
+                            # Reset position
+                            current_position = None
+                            continue
+                        
+                        # Check if stop loss hit
+                        if execution_df.iloc[i]['low'] <= current_position['stop_loss']:
+                            # Calculate loss
+                            loss = current_position['size'] * (current_position['stop_loss'] - current_position['entry'])
+                            capital += loss
+                            
+                            # Record trade
+                            trades.append({
+                                'entry_date': current_position['date'],
+                                'exit_date': current_date,
+                                'type': current_position['type'],
+                                'entry': current_position['entry'],
+                                'exit': current_position['stop_loss'],
+                                'size': current_position['size'],
+                                'profit': loss,
+                                'profit_pct': (loss / current_position['value']) * 100,
+                                'exit_reason': 'stop_loss'
+                            })
+                            
+                            # Reset position
+                            current_position = None
+                            continue
+                    
+                    # For short positions
+                    else:  # SELL
+                        # Check if take profit hit
+                        if execution_df.iloc[i]['low'] <= current_position['take_profit']:
+                            # Calculate profit
+                            profit = current_position['size'] * (current_position['entry'] - current_position['take_profit'])
+                            capital += profit
+                            
+                            # Record trade
+                            trades.append({
+                                'entry_date': current_position['date'],
+                                'exit_date': current_date,
+                                'type': current_position['type'],
+                                'entry': current_position['entry'],
+                                'exit': current_position['take_profit'],
+                                'size': current_position['size'],
+                                'profit': profit,
+                                'profit_pct': (profit / current_position['value']) * 100,
+                                'exit_reason': 'take_profit'
+                            })
+                            
+                            # Reset position
+                            current_position = None
+                            continue
+                        
+                        # Check if stop loss hit
+                        if execution_df.iloc[i]['high'] >= current_position['stop_loss']:
+                            # Calculate loss
+                            loss = current_position['size'] * (current_position['entry'] - current_position['stop_loss'])
+                            capital += loss
+                            
+                            # Record trade
+                            trades.append({
+                                'entry_date': current_position['date'],
+                                'exit_date': current_date,
+                                'type': current_position['type'],
+                                'entry': current_position['entry'],
+                                'exit': current_position['stop_loss'],
+                                'size': current_position['size'],
+                                'profit': loss,
+                                'profit_pct': (loss / current_position['value']) * 100,
+                                'exit_reason': 'stop_loss'
+                            })
+                            
+                            # Reset position
+                            current_position = None
+                            continue
+                
+                # Only look for new trades if not in a position
+                if not current_position:
+                    # Prepare multi-timeframe data up to current candle
+                    current_dfs = {}
+                    for tf, df in dfs.items():
+                        # Filter data up to current date
+                        current_dfs[tf] = df[df.index <= current_date].copy()
+                    
+                    # Perform multi-timeframe analysis
+                    mtf_analysis = combined_strategy.get_multi_timeframe_analysis(current_dfs, symbol, market_type)
+                    
+                    # Get LTF entries that align with HTF POIs
+                    ltf_entries = mtf_analysis.get('ltf_entries', [])
+                    
+                    # Filter for high-quality setups (RR >= 3)
+                    quality_setups = [setup for setup in ltf_entries if setup.get('risk_reward', 0) >= 3]
+                    
+                    if quality_setups:
+                        # Take the highest RR setup
+                        setup = max(quality_setups, key=lambda x: x.get('risk_reward', 0))
+                        
+                        # Calculate position size based on risk
+                        risk_amount = capital * (risk_per_trade / 100)
+                        
+                        if setup['direction'] == 'BUY':
+                            # Calculate risk per unit
+                            risk_per_unit = setup['entry'] - setup['stop_loss']
+                            
+                            if risk_per_unit > 0:
+                                # Calculate position size
+                                position_size = risk_amount / risk_per_unit
+                                position_value = position_size * setup['entry']
+                                
+                                # Enter long position
+                                current_position = {
+                                    'date': current_date,
+                                    'type': 'BUY',
+                                    'entry': setup['entry'],
+                                    'stop_loss': setup['stop_loss'],
+                                    'take_profit': setup['take_profit'],
+                                    'size': position_size,
+                                    'value': position_value,
+                                    'risk': risk_amount
+                                }
+                        
+                        elif setup['direction'] == 'SELL':
+                            # Calculate risk per unit
+                            risk_per_unit = setup['stop_loss'] - setup['entry']
+                            
+                            if risk_per_unit > 0:
+                                # Calculate position size
+                                position_size = risk_amount / risk_per_unit
+                                position_value = position_size * setup['entry']
+                                
+                                # Enter short position
+                                current_position = {
+                                    'date': current_date,
+                                    'type': 'SELL',
+                                    'entry': setup['entry'],
+                                    'stop_loss': setup['stop_loss'],
+                                    'take_profit': setup['take_profit'],
+                                    'size': position_size,
+                                    'value': position_value,
+                                    'risk': risk_amount
+                                }
+            
+            # Close any open position at the end of the backtest
+            if current_position:
+                final_price = execution_df.iloc[-1]['close']
+                
+                if current_position['type'] == 'BUY':
+                    profit = current_position['size'] * (final_price - current_position['entry'])
+                else:  # SELL
+                    profit = current_position['size'] * (current_position['entry'] - final_price)
+                
+                capital += profit
+                
+                # Record trade
+                trades.append({
+                    'entry_date': current_position['date'],
+                    'exit_date': execution_df.index[-1],
+                    'type': current_position['type'],
+                    'entry': current_position['entry'],
+                    'exit': final_price,
+                    'size': current_position['size'],
+                    'profit': profit,
+                    'profit_pct': (profit / current_position['value']) * 100,
+                    'exit_reason': 'end_of_test'
+                })
+                
+                # Update final equity
+                equity[-1] = capital
+            
+            # Calculate performance metrics
+            win_trades = [t for t in trades if t['profit'] > 0]
+            loss_trades = [t for t in trades if t['profit'] <= 0]
+            
+            win_rate = len(win_trades) / len(trades) if trades else 0
+            avg_win = sum(t['profit'] for t in win_trades) / len(win_trades) if win_trades else 0
+            avg_loss = sum(t['profit'] for t in loss_trades) / len(loss_trades) if loss_trades else 0
+            profit_factor = abs(sum(t['profit'] for t in win_trades) / sum(t['profit'] for t in loss_trades)) if loss_trades and sum(t['profit'] for t in loss_trades) != 0 else float('inf')
+            
+            # Calculate average RR
+            avg_rr = 0
+            if trades:
+                rr_values = []
+                for trade in trades:
+                    if trade['type'] == 'BUY':
+                        risk = trade['entry'] - trade['stop_loss'] if 'stop_loss' in trade else 0
+                        reward = trade['exit'] - trade['entry']
+                    else:  # SELL
+                        risk = trade['stop_loss'] - trade['entry'] if 'stop_loss' in trade else 0
+                        reward = trade['entry'] - trade['exit']
+                    
+                    if risk > 0:
+                        rr_values.append(abs(reward / risk))
+                
+                avg_rr = sum(rr_values) / len(rr_values) if rr_values else 0
+            
+            # Compile results
+            results = {
+                'success': True,
+                'symbol': symbol,
+                'timeframes': timeframes,
+                'period': period,
+                'market_type': market_type,
+                'initial_capital': initial_capital,
+                'final_capital': equity[-1],
+                'profit': equity[-1] - initial_capital,
+                'profit_pct': ((equity[-1] / initial_capital) - 1) * 100,
+                'trades': trades,
+                'equity': equity,
+                'trade_count': len(trades),
+                'win_count': len(win_trades),
+                'loss_count': len(loss_trades),
+                'win_rate': win_rate * 100,
+                'avg_win': avg_win,
+                'avg_loss': avg_loss,
+                'profit_factor': profit_factor,
+                'avg_rr': avg_rr,
+                'execution_timeframe': execution_tf,
+                'df': execution_df  # Include the execution dataframe for charting
+            }
+            
+            return results
+            
+        except Exception as e:
+            logger.error(f"Error in multi-timeframe backtest: {e}")
+            import traceback
+            traceback.print_exc()
+            return {
+                'success': False,
+                'message': f"Error running backtest: {str(e)}"
+            }
+    
+    def _timeframe_to_minutes(self, timeframe: str) -> int:
+        """
+        Convert timeframe string to minutes
+        
+        Args:
+            timeframe (str): Timeframe string (e.g., '1m', '1h', '1d')
+            
+        Returns:
+            int: Minutes
+        """
+        if not timeframe:
+            return 0
+        
+        # Extract number and unit
+        import re
+        match = re.match(r'(\d+)([mhdw])', timeframe.lower())
+        if not match:
+            return 0
+        
+        number, unit = match.groups()
+        number = int(number)
+        
+        # Convert to minutes
+        if unit == 'm':
+            return number
+        elif unit == 'h':
+            return number * 60
+        elif unit == 'd':
+            return number * 60 * 24
+        elif unit == 'w':
+            return number * 60 * 24 * 7
+        else:
+            return 0

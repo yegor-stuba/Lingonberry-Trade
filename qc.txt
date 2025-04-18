@@ -1,43 +1,263 @@
 chat:
-> Lingonberry Trading Bot:
-Available commands:
+Analysis for BTCUSDT on M30 timeframe
 
-/start - Start the bot
-/help - Show this help message
-/analyze - Analyze a trading pair
-/pairs - Show available trading pairs
-/timeframes - Show available timeframes
-/chart - View interactive TradingView chart
+Found 8 potential trade setups. Here are the top ones:
 
-/journal - View trading journal
+Trade Setup 1:
+📊 Trade Setup: 
 
-Examples:
-/analyze BTCUSDT H1
-/analyze EURUSD H4
-/chart XAUUSD
+Symbol: BTCUSDT
+Timeframe: M30
+Strategy: combined
 
-> Yegor:
-/analyze
+Entry: 0.00000
+Stop Loss: 84550.76958
+Take Profit: 85138.43338
 
+Risk: 84550.76958 points
+Risk/Reward: -1.01
 
-Modify Trade Setup
+Position Sizing:
+Account Size: $10,000.00
+Risk: 1.0% ($100.00)
+Position Size: 0.00 units
 
-Symbol: EURUSD
-Direction: SHORT
-Entry: 1.13742
-Stop Loss: 1.14320184
-Take Profit: 1.1200744800000006
-Risk/Reward: 3.00
+Potential Profit: $-100.70
+Potential Loss: $100.00
 
-What would you like to modify?
+Analysis:
+Bullish market structure break: Higher low at 84720.21000 after lower high
 
-Change Entry
+Trade Setup 2:
+📊 Trade Setup: 
 
-Change Stop Loss
+Symbol: BTCUSDT
+Timeframe: M30
+Strategy: combined
 
-Change Take Profit
+Entry: 0.00000
+Stop Loss: 84097.06170
+Take Profit: 86430.97490
 
-Cancel
+Risk: 84097.06170 points
+Risk/Reward: -1.03
+
+Position Sizing:
+Account Size: $10,000.00
+Risk: 1.0% ($100.00)
+Position Size: 0.00 units
+
+Potential Profit: $-102.78
+Potential Loss: $100.00
+
+Analysis:
+ICT Bullish Breaker Block at 84519.66000-84630.85000
+
+Trade Setup 3:
+📊 Trade Setup: 
+
+Symbol: BTCUSDT
+Timeframe: M30
+Strategy: combined
+
+Entry: 0.00000
+Stop Loss: 84114.53390
+Take Profit: 86378.55830
+
+Risk: 84114.53390 points
+Risk/Reward: -1.03
+
+Position Sizing:
+Account Size: $10,000.00
+Risk: 1.0% ($100.00)
+Position Size: 0.00 units
+
+Potential Profit: $-102.69
+Potential Loss: $100.00
+
+Analysis:
+ICT Bullish Breaker Block at 84537.22000-84647.33000
+
+You can accept, reject, or modify the top trade setup.
+
 
 
 terminal:
+(stable_venv) yegor@tourist trading bot 2 % python -m trading_bot.main --use-ngrok
+2025-04-18 14:47:17,606 - trading_bot.journal.trade_journal - INFO - Trade journal initialized with database at /Users/yegor/.trading_bot/trades.db
+2025-04-18 14:47:17,614 - trading_bot.data.crypto_data - INFO - Initialized binance exchange connection
+2025-04-18 14:47:17,614 - trading_bot.data.ctrader_data - INFO - Connecting to cTrader API...
+2025-04-18 14:47:17,631 - trading_bot.data.ctrader_data - INFO - Connected to cTrader Open API
+2025-04-18 14:47:18,690 - trading_bot.data.ctrader_data - INFO - Application authenticated successfully
+2025-04-18 14:47:19,617 - trading_bot.data.data_processor - INFO - Connecting to cTrader for live data
+2025-04-18 14:47:19,701 - __main__ - INFO - Initializing trading bot components...
+2025-04-18 14:47:19,711 - trading_bot.data.crypto_data - INFO - Initialized binance exchange connection
+2025-04-18 14:47:19,711 - trading_bot.data.ctrader_data - INFO - Connecting to cTrader API...
+2025-04-18 14:47:19,738 - trading_bot.data.ctrader_data - INFO - Account authenticated successfully
+2025-04-18 14:47:21,716 - trading_bot.data.data_processor - INFO - Connecting to cTrader for live data
+2025-04-18 14:47:21,718 - trading_bot.journal.trade_journal - INFO - Trade journal initialized with database at /Users/yegor/.trading_bot/trades.db
+2025-04-18 14:47:21,718 - trading_bot.strategy.strategy_base - INFO - Initialized Smart Money Concepts strategy
+2025-04-18 14:47:21,718 - trading_bot.strategy.signal_generator - INFO - Added smc strategy to signal generator
+2025-04-18 14:47:21,719 - trading_bot.strategy.strategy_base - INFO - Initialized Inner Circle Trader strategy
+2025-04-18 14:47:21,719 - trading_bot.strategy.signal_generator - INFO - Added ict strategy to signal generator
+2025-04-18 14:47:21,719 - trading_bot.strategy.strategy_base - INFO - Initialized combined strategy
+2025-04-18 14:47:21,719 - trading_bot.strategy.strategy_base - INFO - Initialized Smart Money Concepts strategy
+2025-04-18 14:47:21,719 - trading_bot.strategy.strategy_base - INFO - Initialized Inner Circle Trader strategy
+Device set to use mps:0
+2025-04-18 14:47:22,672 - trading_bot.analysis.sentiment - INFO - Loaded distilbert sentiment model successfully
+2025-04-18 14:47:22,673 - trading_bot.strategy.combined_strategy - INFO - Initialized combined strategy with SMC, ICT, Technical, and Sentiment analysis
+2025-04-18 14:47:22,673 - trading_bot.strategy.signal_generator - INFO - Added combined strategy to signal generator
+2025-04-18 14:47:22,673 - trading_bot.strategy.signal_generator - INFO - Initialized signal generator with 3 strategies
+2025-04-18 14:47:22,673 - __main__ - INFO - Starting web dashboard...
+2025-04-18 14:47:22,677 - pyngrok.ngrok - INFO - Opening tunnel named: http-5000-be533ac0-a33a-4644-b3aa-bde5cb56744d
+2025-04-18 14:47:22,678 - pyngrok.process - INFO - Overriding default auth token
+2025-04-18 14:47:22,776 - pyngrok.process.ngrok - INFO - t=2025-04-18T14:47:22+0200 lvl=info msg="no configuration paths supplied"
+2025-04-18 14:47:22,776 - pyngrok.process.ngrok - INFO - t=2025-04-18T14:47:22+0200 lvl=info msg="using configuration at default config path" path="/Users/yegor/Library/Application Support/ngrok/ngrok.yml"
+2025-04-18 14:47:22,776 - pyngrok.process.ngrok - INFO - t=2025-04-18T14:47:22+0200 lvl=info msg="open config file" path="/Users/yegor/Library/Application Support/ngrok/ngrok.yml" err=nil
+2025-04-18 14:47:22,780 - pyngrok.process.ngrok - INFO - t=2025-04-18T14:47:22+0200 lvl=info msg="starting web service" obj=web addr=127.0.0.1:4040 allow_hosts=[]
+2025-04-18 14:47:22,963 - pyngrok.process.ngrok - INFO - t=2025-04-18T14:47:22+0200 lvl=info msg="client session established" obj=tunnels.session
+2025-04-18 14:47:22,964 - pyngrok.process.ngrok - INFO - t=2025-04-18T14:47:22+0200 lvl=info msg="tunnel session started" obj=tunnels.session
+2025-04-18 14:47:22,966 - pyngrok.process.ngrok - INFO - t=2025-04-18T14:47:22+0200 lvl=info msg=start pg=/api/tunnels id=bf8876b741f1068f
+2025-04-18 14:47:22,967 - pyngrok.process.ngrok - INFO - t=2025-04-18T14:47:22+0200 lvl=info msg=end pg=/api/tunnels id=bf8876b741f1068f status=200 dur=126.625µs
+2025-04-18 14:47:22,967 - pyngrok.process.ngrok - INFO - t=2025-04-18T14:47:22+0200 lvl=info msg=start pg=/api/tunnels id=50958f2e4e0af129
+2025-04-18 14:47:22,967 - pyngrok.process.ngrok - INFO - t=2025-04-18T14:47:22+0200 lvl=info msg=end pg=/api/tunnels id=50958f2e4e0af129 status=200 dur=54µs
+2025-04-18 14:47:22,968 - pyngrok.process.ngrok - INFO - t=2025-04-18T14:47:22+0200 lvl=info msg=start pg=/api/tunnels id=52f9948d13cb078b
+2025-04-18 14:47:22,999 - pyngrok.process.ngrok - INFO - t=2025-04-18T14:47:22+0200 lvl=info msg="started tunnel" obj=tunnels name=http-5000-be533ac0-a33a-4644-b3aa-bde5cb56744d addr=http://localhost:5000 url=https://845e-2a01-c846-19c3-3200-7c84-47b7-e266-484.ngrok-free.app
+2025-04-18 14:47:22,999 - __main__ - INFO - Web dashboard available at: https://845e-2a01-c846-19c3-3200-7c84-47b7-e266-484.ngrok-free.app
+2025-04-18 14:47:22,999 - pyngrok.process.ngrok - INFO - t=2025-04-18T14:47:22+0200 lvl=info msg=end pg=/api/tunnels id=52f9948d13cb078b status=201 dur=31.099333ms
+2025-04-18 14:47:23,000 - trading_bot.ui.web_dashboard.app - INFO - Starting web dashboard on 0.0.0.0:5000
+2025-04-18 14:47:23,000 - __main__ - INFO - Starting Telegram bot...
+ * Serving Flask app 'trading_bot.ui.web_dashboard.app'
+ * Debug mode: off
+2025-04-18 14:47:23,070 - trading_bot.data.crypto_data - INFO - Initialized binance exchange connection
+2025-04-18 14:47:23,070 - trading_bot.data.ctrader_data - INFO - Connecting to cTrader API...
+2025-04-18 14:47:25,073 - trading_bot.data.data_processor - INFO - Connecting to cTrader for live data
+2025-04-18 14:47:25,074 - trading_bot.strategy.strategy_base - INFO - Initialized Smart Money Concepts strategy
+2025-04-18 14:47:25,074 - trading_bot.strategy.signal_generator - INFO - Added smc strategy to signal generator
+2025-04-18 14:47:25,074 - trading_bot.strategy.strategy_base - INFO - Initialized Inner Circle Trader strategy
+2025-04-18 14:47:25,074 - trading_bot.strategy.signal_generator - INFO - Added ict strategy to signal generator
+2025-04-18 14:47:25,074 - trading_bot.strategy.strategy_base - INFO - Initialized combined strategy
+2025-04-18 14:47:25,074 - trading_bot.strategy.strategy_base - INFO - Initialized Smart Money Concepts strategy
+2025-04-18 14:47:25,074 - trading_bot.strategy.strategy_base - INFO - Initialized Inner Circle Trader strategy
+Device set to use mps:0
+2025-04-18 14:47:25,446 - trading_bot.analysis.sentiment - INFO - Loaded distilbert sentiment model successfully
+2025-04-18 14:47:25,447 - trading_bot.strategy.combined_strategy - INFO - Initialized combined strategy with SMC, ICT, Technical, and Sentiment analysis
+2025-04-18 14:47:25,447 - trading_bot.strategy.signal_generator - INFO - Added combined strategy to signal generator
+2025-04-18 14:47:25,447 - trading_bot.strategy.signal_generator - INFO - Initialized signal generator with 3 strategies
+2025-04-18 14:47:25,448 - trading_bot.journal.trade_journal - INFO - Trade journal initialized with database at /Users/yegor/.trading_bot/trades.db
+2025-04-18 14:47:25,448 - trading_bot.ui.telegram_bot - INFO - Telegram bot using dashboard URL: https://845e-2a01-c846-19c3-3200-7c84-47b7-e266-484.ngrok-free.app
+2025-04-18 14:47:25,556 - httpx - INFO - HTTP Request: POST https://api.telegram.org/bot7651596899:AAF--e_FnbDU1RqEA5r0v3P4xncljx68G3c/getMe "HTTP/1.1 200 OK"
+2025-04-18 14:47:25,557 - apscheduler.scheduler - INFO - Scheduler started
+2025-04-18 14:47:25,557 - telegram.ext.Application - INFO - Application started
+2025-04-18 14:47:25,588 - httpx - INFO - HTTP Request: POST https://api.telegram.org/bot7651596899:AAF--e_FnbDU1RqEA5r0v3P4xncljx68G3c/deleteWebhook "HTTP/1.1 200 OK"
+2025-04-18 14:47:25,588 - trading_bot.ui.telegram_bot - INFO - Telegram bot started successfully
+2025-04-18 14:47:25,588 - __main__ - INFO - Trading bot started successfully!
+2025-04-18 14:47:25,588 - __main__ - INFO - Press Ctrl+C to exit
+2025-04-18 14:47:28,020 - werkzeug - INFO - WARNING: This is a development server. Do not use it in a production deployment. Use a production WSGI server instead.
+ * Running on all addresses (0.0.0.0)
+ * Running on http://127.0.0.1:5000
+ * Running on http://192.168.100.65:5000
+2025-04-18 14:47:28,021 - werkzeug - INFO - Press CTRL+C to quit
+2025-04-18 14:47:35,763 - httpx - INFO - HTTP Request: POST https://api.telegram.org/bot7651596899:AAF--e_FnbDU1RqEA5r0v3P4xncljx68G3c/getUpdates "HTTP/1.1 200 OK"
+2025-04-18 14:47:41,722 - httpx - INFO - HTTP Request: POST https://api.telegram.org/bot7651596899:AAF--e_FnbDU1RqEA5r0v3P4xncljx68G3c/getUpdates "HTTP/1.1 200 OK"
+2025-04-18 14:47:41,838 - httpx - INFO - HTTP Request: POST https://api.telegram.org/bot7651596899:AAF--e_FnbDU1RqEA5r0v3P4xncljx68G3c/sendMessage "HTTP/1.1 200 OK"
+2025-04-18 14:47:44,967 - httpx - INFO - HTTP Request: POST https://api.telegram.org/bot7651596899:AAF--e_FnbDU1RqEA5r0v3P4xncljx68G3c/getUpdates "HTTP/1.1 200 OK"
+2025-04-18 14:47:45,022 - httpx - INFO - HTTP Request: POST https://api.telegram.org/bot7651596899:AAF--e_FnbDU1RqEA5r0v3P4xncljx68G3c/sendMessage "HTTP/1.1 200 OK"
+2025-04-18 14:47:55,007 - httpx - INFO - HTTP Request: POST https://api.telegram.org/bot7651596899:AAF--e_FnbDU1RqEA5r0v3P4xncljx68G3c/getUpdates "HTTP/1.1 200 OK"
+2025-04-18 14:47:56,967 - httpx - INFO - HTTP Request: POST https://api.telegram.org/bot7651596899:AAF--e_FnbDU1RqEA5r0v3P4xncljx68G3c/getUpdates "HTTP/1.1 200 OK"
+2025-04-18 14:47:57,083 - httpx - INFO - HTTP Request: POST https://api.telegram.org/bot7651596899:AAF--e_FnbDU1RqEA5r0v3P4xncljx68G3c/sendMessage "HTTP/1.1 200 OK"
+2025-04-18 14:48:00,559 - httpx - INFO - HTTP Request: POST https://api.telegram.org/bot7651596899:AAF--e_FnbDU1RqEA5r0v3P4xncljx68G3c/getUpdates "HTTP/1.1 200 OK"
+2025-04-18 14:48:00,602 - httpx - INFO - HTTP Request: POST https://api.telegram.org/bot7651596899:AAF--e_FnbDU1RqEA5r0v3P4xncljx68G3c/answerCallbackQuery "HTTP/1.1 200 OK"
+2025-04-18 14:48:00,656 - httpx - INFO - HTTP Request: POST https://api.telegram.org/bot7651596899:AAF--e_FnbDU1RqEA5r0v3P4xncljx68G3c/editMessageText "HTTP/1.1 200 OK"
+2025-04-18 14:48:03,271 - httpx - INFO - HTTP Request: POST https://api.telegram.org/bot7651596899:AAF--e_FnbDU1RqEA5r0v3P4xncljx68G3c/getUpdates "HTTP/1.1 200 OK"
+2025-04-18 14:48:03,311 - httpx - INFO - HTTP Request: POST https://api.telegram.org/bot7651596899:AAF--e_FnbDU1RqEA5r0v3P4xncljx68G3c/answerCallbackQuery "HTTP/1.1 200 OK"
+2025-04-18 14:48:03,365 - httpx - INFO - HTTP Request: POST https://api.telegram.org/bot7651596899:AAF--e_FnbDU1RqEA5r0v3P4xncljx68G3c/editMessageText "HTTP/1.1 200 OK"
+2025-04-18 14:48:06,349 - httpx - INFO - HTTP Request: POST https://api.telegram.org/bot7651596899:AAF--e_FnbDU1RqEA5r0v3P4xncljx68G3c/getUpdates "HTTP/1.1 200 OK"
+2025-04-18 14:48:06,484 - httpx - INFO - HTTP Request: POST https://api.telegram.org/bot7651596899:AAF--e_FnbDU1RqEA5r0v3P4xncljx68G3c/answerCallbackQuery "HTTP/1.1 200 OK"
+2025-04-18 14:48:06,655 - httpx - INFO - HTTP Request: POST https://api.telegram.org/bot7651596899:AAF--e_FnbDU1RqEA5r0v3P4xncljx68G3c/editMessageText "HTTP/1.1 200 OK"
+2025-04-18 14:48:06,658 - trading_bot.data.data_processor - INFO - Fetching live data from crypto provider for BTCUSDT M30
+2025-04-18 14:48:06,659 - trading_bot.data.crypto_data - INFO - Trying to get BTCUSDT 30m data from ccxt
+2025-04-18 14:48:14,185 - trading_bot.data.crypto_data - INFO - Successfully got BTCUSDT 30m data from CCXT
+2025-04-18 14:48:14,186 - trading_bot.strategy.signal_generator - INFO - Generating signals for BTCUSDT on M30 timeframe
+2025-04-18 14:48:14,186 - trading_bot.strategy.signal_generator - ERROR - Error generating signals with smc strategy: SMCStrategy.generate_signals() takes 2 positional arguments but 4 were given
+Traceback (most recent call last):
+  File "/Users/yegor/Documents/Agency & Security Stuff/trading bot 2/trading_bot/strategy/signal_generator.py", line 125, in generate_signals
+    signals = strategy.generate_signals(symbol, df, timeframe)
+TypeError: SMCStrategy.generate_signals() takes 2 positional arguments but 4 were given
+2025-04-18 14:48:14,186 - trading_bot.strategy.signal_generator - ERROR - Error generating signals with ict strategy: ICTStrategy.generate_signals() takes 2 positional arguments but 4 were given
+Traceback (most recent call last):
+  File "/Users/yegor/Documents/Agency & Security Stuff/trading bot 2/trading_bot/strategy/signal_generator.py", line 125, in generate_signals
+    signals = strategy.generate_signals(symbol, df, timeframe)
+TypeError: ICTStrategy.generate_signals() takes 2 positional arguments but 4 were given
+2025-04-18 14:48:14,187 - trading_bot.strategy.combined_strategy - INFO - Analyzing BTCUSDT on M30 with combined strategy
+2025-04-18 14:48:14,198 - trading_bot.strategy.smc_strategy - INFO - Analyzing                          open      high       low     close     volume
+datetime                                                              
+2025-04-16 11:00:00  83937.02  84084.00  83833.63  83873.82  361.45212
+2025-04-16 11:30:00  83873.83  84127.05  83782.60  84048.11  203.06508
+2025-04-16 12:00:00  84048.36  84262.00  84000.00  84180.65  306.75831
+2025-04-16 12:30:00  84180.66  84213.53  83722.56  83757.72  353.91624
+2025-04-16 13:00:00  83757.73  83800.28  83620.75  83725.66  256.32885
+...                       ...       ...       ...       ...        ...
+2025-04-18 10:30:00  84631.27  84631.28  84500.00  84521.25  121.92909
+2025-04-18 11:00:00  84521.25  84625.06  84472.25  84523.92  139.78655
+2025-04-18 11:30:00  84523.92  84669.12  84507.01  84669.11  110.27900
+2025-04-18 12:00:00  84669.11  84714.00  84566.16  84660.00  102.77678
+2025-04-18 12:30:00  84660.00  84769.95  84659.99  84680.54  122.35659
+
+[100 rows x 5 columns] on M30 timeframe using SMC strategy
+2025-04-18 14:48:14,198 - trading_bot.analysis.smc_analyzer - INFO - Starting SMC analysis for BTCUSDT with 100 candles
+2025-04-18 14:48:14,207 - trading_bot.analysis.smc_analyzer - INFO - Market structure for BTCUSDT: neutral
+2025-04-18 14:48:14,221 - trading_bot.analysis.smc_analyzer - INFO - Found 14 key levels for BTCUSDT
+2025-04-18 14:48:14,229 - trading_bot.analysis.smc_analyzer - INFO - Found 8 order blocks for BTCUSDT
+2025-04-18 14:48:14,232 - trading_bot.analysis.smc_analyzer - INFO - Found 6 fair value gaps for BTCUSDT
+2025-04-18 14:48:14,243 - trading_bot.analysis.smc_analyzer - INFO - Found 10 liquidity levels for BTCUSDT
+2025-04-18 14:48:14,245 - trading_bot.analysis.smc_analyzer - INFO - Order flow analysis completed for BTCUSDT
+2025-04-18 14:48:14,246 - trading_bot.analysis.smc_analyzer - INFO - Found 3 liquidity sweeps for BTCUSDT
+2025-04-18 14:48:14,275 - trading_bot.analysis.smc_analyzer - INFO - Found 0 trade setups for BTCUSDT
+2025-04-18 14:48:14,275 - trading_bot.strategy.smc_strategy - INFO - SMC analysis for BTCUSDT on M30 complete. Found 1 signals.
+2025-04-18 14:48:14,275 - trading_bot.strategy.ict_strategy - INFO - Analyzing BTCUSDT on M30 timeframe using ICT strategy
+2025-04-18 14:48:14,275 - trading_bot.analysis.smc_analyzer - INFO - Starting SMC analysis for BTCUSDT with 100 candles
+2025-04-18 14:48:14,281 - trading_bot.analysis.smc_analyzer - INFO - Market structure for BTCUSDT: neutral
+2025-04-18 14:48:14,293 - trading_bot.analysis.smc_analyzer - INFO - Found 14 key levels for BTCUSDT
+2025-04-18 14:48:14,301 - trading_bot.analysis.smc_analyzer - INFO - Found 8 order blocks for BTCUSDT
+2025-04-18 14:48:14,304 - trading_bot.analysis.smc_analyzer - INFO - Found 6 fair value gaps for BTCUSDT
+2025-04-18 14:48:14,315 - trading_bot.analysis.smc_analyzer - INFO - Found 10 liquidity levels for BTCUSDT
+2025-04-18 14:48:14,316 - trading_bot.analysis.smc_analyzer - INFO - Order flow analysis completed for BTCUSDT
+2025-04-18 14:48:14,318 - trading_bot.analysis.smc_analyzer - INFO - Found 3 liquidity sweeps for BTCUSDT
+2025-04-18 14:48:14,347 - trading_bot.analysis.smc_analyzer - INFO - Found 0 trade setups for BTCUSDT
+2025-04-18 14:48:14,370 - trading_bot.strategy.ict_strategy - INFO - ICT analysis for BTCUSDT on M30 complete. Found 5 signals.
+2025-04-18 14:48:14,370 - trading_bot.analysis.technical - INFO - Starting technical analysis for BTCUSDT with 100 candles
+2025-04-18 14:48:14,370 - trading_bot.analysis.technical - INFO - Data range: 2025-04-16 11:00:00 to 2025-04-18 12:30:00
+2025-04-18 14:48:14,372 - trading_bot.analysis.technical - INFO - Found 8 candlestick patterns
+2025-04-18 14:48:14,437 - trading_bot.strategy.signal_generator - INFO - Strategy combined generated 10 signals
+2025-04-18 14:48:14,439 - trading_bot.ui.telegram_bot - INFO - Found 10 raw signals for BTCUSDT on M30
+2025-04-18 14:48:14,439 - trading_bot.ui.telegram_bot - INFO - After filtering, 8 signals remain
+2025-04-18 14:48:14,442 - trading_bot.utils.visualization - ERROR - Error creating trade chart: kwarg "linestyle" validator returned False for value: ":"
+    'Validator'   : lambda value: value in valid_linestyles },
+2025-04-18 14:48:14,442 - trading_bot.ui.telegram_bot - WARNING - Failed to create chart for BTCUSDT trade setup, showing text only
+2025-04-18 14:48:14,561 - httpx - INFO - HTTP Request: POST https://api.telegram.org/bot7651596899:AAF--e_FnbDU1RqEA5r0v3P4xncljx68G3c/editMessageText "HTTP/1.1 200 OK"
+2025-04-18 14:48:16,414 - httpx - INFO - HTTP Request: POST https://api.telegram.org/bot7651596899:AAF--e_FnbDU1RqEA5r0v3P4xncljx68G3c/getUpdates "HTTP/1.1 200 OK"
+2025-04-18 14:48:26,447 - httpx - INFO - HTTP Request: POST https://api.telegram.org/bot7651596899:AAF--e_FnbDU1RqEA5r0v3P4xncljx68G3c/getUpdates "HTTP/1.1 200 OK"
+2025-04-18 14:48:36,587 - httpx - INFO - HTTP Request: POST https://api.telegram.org/bot7651596899:AAF--e_FnbDU1RqEA5r0v3P4xncljx68G3c/getUpdates "HTTP/1.1 200 OK"
+2025-04-18 14:48:46,623 - httpx - INFO - HTTP Request: POST https://api.telegram.org/bot7651596899:AAF--e_FnbDU1RqEA5r0v3P4xncljx68G3c/getUpdates "HTTP/1.1 200 OK"
+2025-04-18 14:48:56,759 - httpx - INFO - HTTP Request: POST https://api.telegram.org/bot7651596899:AAF--e_FnbDU1RqEA5r0v3P4xncljx68G3c/getUpdates "HTTP/1.1 200 OK"
+^C2025-04-18 14:49:00,349 - __main__ - INFO - Shutdown signal received. Closing all connections...
+2025-04-18 14:49:00,350 - pyngrok.process.ngrok - INFO - t=2025-04-18T14:49:00+0200 lvl=info msg="received stop request" obj=app stopReq="{err:<nil> restart:false}"
+2025-04-18 14:49:00,350 - pyngrok.process.ngrok - INFO - t=2025-04-18T14:49:00+0200 lvl=info msg="session closing" obj=tunnels.session err=nil
+2025-04-18 14:49:00,351 - pyngrok.process.ngrok - INFO - t=2025-04-18T14:49:00+0200 lvl=info msg="accept failed" obj=tunnels.session obj=csess id=1c6a019578dd err="reconnecting session closed"
+2025-04-18 14:49:00,920 - __main__ - INFO - Cleaning up resources...
+2025-04-18 14:49:00,920 - __main__ - INFO - Closing data processor connections...
+2025-04-18 14:49:00,920 - trading_bot.data.ctrader_data - INFO - Disconnecting from cTrader API...
+2025-04-18 14:49:00,921 - trading_bot.data.ctrader_data - INFO - Disconnected from cTrader API
+2025-04-18 14:49:00,921 - trading_bot.data.data_processor - INFO - Using existing event loop for cleanup
+2025-04-18 14:49:00,921 - trading_bot.data.data_processor - INFO - Closed all data provider connections
+2025-04-18 14:49:00,921 - __main__ - INFO - Closing ngrok tunnels...
+2025-04-18 14:49:00,921 - __main__ - INFO - Stopping Telegram bot...
+2025-04-18 14:49:00,921 - telegram.ext.Application - INFO - Application is stopping. This might take a moment.
+2025-04-18 14:49:00,922 - apscheduler.scheduler - INFO - Scheduler has been shut down
+2025-04-18 14:49:00,932 - telegram.ext.Application - INFO - Application.stop() complete
+2025-04-18 14:49:00,932 - __main__ - INFO - Trading bot shutdown complete.
+2025-04-18 14:49:01,128 - ccxt.base.exchange - WARNING - binance requires to release all resources with an explicit call to the .close() coroutine. If you are using the exchange instance with async coroutines, add `await exchange.close()` to your code into a place when you're done with the exchange and don't need the exchange instance anymore (at the end of your async coroutine).
+2025-04-18 14:49:01,128 - asyncio - ERROR - Unclosed client session
+client_session: <aiohttp.client.ClientSession object at 0x13b9d6cb0>
+(stable_venv) yegor@tourist trading bot 2 % 

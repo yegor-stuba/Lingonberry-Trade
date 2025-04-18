@@ -1,212 +1,268 @@
 """
-Main entry point for the trading bot
+Main entry point for the Lingonberry Trade Bot
+Launches all components of the trading system
 """
 
 import os
 import sys
 import logging
-import asyncio
 import threading
-import time
-import json
-import subprocess
-import requests
+import argparse
+import asyncio
+import signal
+import time  # Add time module import
 from pathlib import Path
 
-from trading_bot.ui.telegram_bot import TelegramBot
-from trading_bot.strategy.signal_generator import SignalGenerator
-from trading_bot.data.data_processor import DataProcessor
-from trading_bot.config.settings import DASHBOARD_URL, DASHBOARD_ENABLED
-from trading_bot.ui.web_dashboard.app import app
-from apscheduler.schedulers.background import BackgroundScheduler
-from trading_bot.journal.trade_journal import TradeJournal
 
+# Add the project root to the Python path
+sys.path.append(str(Path(__file__).resolve().parent.parent))
+
+from trading_bot.data.data_processor import DataProcessor
+from trading_bot.strategy.signal_generator import SignalGenerator
+from trading_bot.ui.telegram_bot import TelegramBot
+from trading_bot.ui.web_dashboard.app import start_dashboard
+from trading_bot.config.settings import DASHBOARD_ENABLED, DASHBOARD_URL
+from trading_bot.journal.trade_journal import TradeJournal
+from trading_bot.config import credentials
+
+# Create necessary directories
+os.makedirs("logs", exist_ok=True)
+os.makedirs("data", exist_ok=True)
+os.makedirs("charts", exist_ok=True)
+os.makedirs("charts/crypto", exist_ok=True)
+os.makedirs("charts/forex", exist_ok=True)
+
+# Ensure the database file path exists
+db_path = Path("data/trade_journal.db")
+if not db_path.parent.exists():
+    os.makedirs(db_path.parent, exist_ok=True)
 # Configure logging
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     handlers=[
-        logging.StreamHandler(),
-        logging.FileHandler("trading_bot.log")
+        logging.FileHandler("logs/trading_bot.log"),
+        logging.StreamHandler()
     ]
 )
+
 logger = logging.getLogger(__name__)
 
-# Global variable to store ngrok process
-ngrok_process = None
-actual_dashboard_url = None
+# Global flag to control the main loop
+running = True
 
-def start_ngrok(port):
-    """Start ngrok and return the public URL"""
-    global ngrok_process
-    
+def signal_handler(sig, frame):
+    """Handle termination signals"""
+    global running
+    logger.info("Shutdown signal received. Closing all connections...")
+    running = False
+
+
+# Add the check_connections function
+def check_connections(data_processor):
+    """Periodically check and restore connections if needed"""
     try:
-        # Check if ngrok is installed
-        try:
-            subprocess.run(["ngrok", "--version"], check=True, capture_output=True)
-        except (subprocess.CalledProcessError, FileNotFoundError):
-            logger.error("ngrok is not installed or not in PATH. Please install it first.")
-            return None
+        # Check if cTrader is connected
+        ctrader = data_processor.ctrader
+        if hasattr(ctrader, 'connected') and not ctrader.connected:
+            logger.info("Detected disconnected cTrader, attempting to reconnect...")
+            ctrader.connect()
+    except Exception as e:
+        logger.error(f"Error checking connections: {e}", exc_info=True)
+
+def start_ngrok(port=5000):
+    """Start ngrok tunnel for the web dashboard"""
+    try:
+        from pyngrok import ngrok, conf
         
-        # Start ngrok process
-        ngrok_process = subprocess.Popen(
-            ["ngrok", "http", str(port)],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE
-        )
-        logger.info(f"Started ngrok process (PID: {ngrok_process.pid})")
+        # Configure ngrok
+        conf.get_default().auth_token = credentials.NGROK_AUTHTOKEN
         
-        # Wait for ngrok to start
-        time.sleep(2)
+        # Start ngrok tunnel
+        public_url = ngrok.connect(port, "http")
+        logger.info(f"Web dashboard available at: {public_url}")
         
-        # Get the public URL from ngrok API
-        try:
-            response = requests.get("http://localhost:4040/api/tunnels")
-            tunnels = json.loads(response.text)["tunnels"]
-            if tunnels:
-                public_url = tunnels[0]["public_url"]
-                logger.info(f"ngrok public URL: {public_url}")
-                return public_url
-            else:
-                logger.error("No ngrok tunnels found")
-                return None
-        except Exception as e:
-            logger.error(f"Error getting ngrok URL: {e}")
-            return None
-            
+        # Set the dashboard URL as an environment variable
+        os.environ["DASHBOARD_URL"] = public_url
+        
+        return public_url
+    except ImportError:
+        logger.warning("pyngrok not installed. Install with: pip install pyngrok")
+        return None
     except Exception as e:
         logger.error(f"Error starting ngrok: {e}")
         return None
 
-def stop_ngrok():
-    """Stop the ngrok process"""
-    global ngrok_process
-    if ngrok_process:
-        logger.info(f"Stopping ngrok process (PID: {ngrok_process.pid})")
-        ngrok_process.terminate()
-        ngrok_process = None
-
-def run_dashboard():
+def run_web_dashboard(port=5000, use_ngrok=False):
     """Run the web dashboard in a separate thread"""
+    if use_ngrok:
+        dashboard_url = start_ngrok(port)
+    else:
+        dashboard_url = f"http://localhost:{port}"
+    
+    # Start the dashboard
+    start_dashboard(host='0.0.0.0', port=port, debug=False)
+
+async def run_telegram_bot(telegram_bot):
+    """Run the Telegram bot asynchronously"""
     try:
-        logger.info(f"Starting web dashboard on {DASHBOARD_URL}")
-        # Parse the port from DASHBOARD_URL or use default 5000
-        port = 5000
-        if ":" in DASHBOARD_URL:
+        await telegram_bot.run_async()
+    except Exception as e:
+        logger.error(f"Error starting Telegram bot: {e}", exc_info=True)
+        
+async def main_async():
+    """Async version of the main function"""
+    try:
+        # Parse command line arguments
+        parser = argparse.ArgumentParser(description="Lingonberry Trade Bot")
+        parser.add_argument("--no-dashboard", action="store_true", help="Disable web dashboard")
+        parser.add_argument("--no-telegram", action="store_true", help="Disable Telegram bot")
+        parser.add_argument("--port", type=int, default=5000, help="Port for web dashboard")
+        parser.add_argument("--use-ngrok", action="store_true", help="Use ngrok for web dashboard")
+        parser.add_argument("--no-cache", action="store_true", help="Disable initial data caching")
+        args = parser.parse_args()
+        
+        # Initialize components
+        logger.info("Initializing trading bot components...")
+        
+        # Initialize core components with error handling
+        try:
+            data_processor = DataProcessor()
+            trade_journal = TradeJournal()
+            signal_generator = SignalGenerator()
+        except Exception as e:
+            logger.error(f"Failed to initialize core components: {e}", exc_info=True)
+            return
+        
+        # Track active resources for cleanup
+        active_resources = {
+            'data_processor': data_processor,
+            'ngrok_tunnels': [],
+            'telegram_bot': None
+        }
+        
+        # Start web dashboard if enabled
+        dashboard_url = None
+        dashboard_thread = None
+        
+        if DASHBOARD_ENABLED and not args.no_dashboard:
+            dashboard_url = await setup_dashboard(args, active_resources)
+            if dashboard_url:
+                dashboard_thread = threading.Thread(
+                    target=lambda: start_dashboard(host='0.0.0.0', port=args.port, debug=False),
+                    daemon=True
+                )
+                dashboard_thread.start()
+        
+        # Start Telegram bot if enabled
+        if not args.no_telegram:
+            await setup_telegram_bot(dashboard_url, active_resources)
+        
+        # Main loop
+        global running
+        running = True
+        
+        try:
+            logger.info("Trading bot started successfully!")
+            logger.info("Press Ctrl+C to exit")
+            
+            # Keep the main thread alive with periodic connection checks
+            connection_check_interval = 60
+            last_check_time = time.time()
+            
+            while running:
+                current_time = time.time()
+                if current_time - last_check_time > connection_check_interval:
+                    check_connections(data_processor)
+                    last_check_time = current_time
+                await asyncio.sleep(1)
+                
+        except KeyboardInterrupt:
+            logger.info("Keyboard interrupt received. Shutting down...")
+        finally:
+            await cleanup_resources(active_resources)
+            
+    except Exception as e:
+        logger.error(f"Critical error in main_async: {e}", exc_info=True)
+        raise
+
+async def setup_dashboard(args, active_resources):
+    """Setup dashboard and ngrok if enabled"""
+    try:
+        logger.info("Starting web dashboard...")
+        if args.use_ngrok:
             try:
-                port = int(DASHBOARD_URL.split(":")[-1].split("/")[0])
-            except (ValueError, IndexError):
-                pass
-        
-        # On macOS, use port 8080 instead of 5000 to avoid AirPlay conflict
-        if sys.platform == 'darwin' and port == 5000:
-            port = 8080
-            logger.info(f"Using port {port} on macOS to avoid AirPlay conflict")
-        
-        # Make sure to bind to 0.0.0.0 to allow external connections
-        app.run(debug=False, host='0.0.0.0', port=port, use_reloader=False)
+                from pyngrok import ngrok, conf
+                conf.get_default().auth_token = credentials.NGROK_AUTHTOKEN
+                tunnel = ngrok.connect(args.port, "http")
+                active_resources['ngrok_tunnels'].append(tunnel)
+                dashboard_url = tunnel.public_url
+                logger.info(f"Web dashboard available at: {dashboard_url}")
+                os.environ["DASHBOARD_URL"] = dashboard_url
+                return dashboard_url
+            except ImportError:
+                logger.warning("pyngrok not installed. Install with: pip install pyngrok")
+            except Exception as e:
+                logger.error(f"Error starting ngrok: {e}", exc_info=True)
+        return f"http://localhost:{args.port}"
     except Exception as e:
-        logger.error(f"Error starting web dashboard: {e}")
-
-# Add a scheduled task to update trade statuses
-def update_trade_statuses():
-    """Update the status of pending and active trades"""
-    try:
-        logger.info("Updating trade statuses...")
-        trade_journal = TradeJournal()
-        
-        # Create a data processor for getting current prices
-        data_processor = DataProcessor()
-        
-        # Create an event loop for async operations
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        
-        # Run the check functions
-        loop.run_until_complete(trade_journal.check_pending_trades(data_processor))
-        loop.run_until_complete(trade_journal.check_active_trades(data_processor))
-        
-        # Close the loop
-        loop.close()
-        
-        logger.info("Trade statuses updated successfully")
-    except Exception as e:
-        logger.error(f"Error updating trade statuses: {e}")
-
-def get_ngrok_url():
-    """Get the public URL from ngrok"""
-    try:
-        response = requests.get("http://localhost:4040/api/tunnels")
-        tunnels = json.loads(response.text)["tunnels"]
-        for tunnel in tunnels:
-            if tunnel["proto"] == "https":
-                return tunnel["public_url"]
+        logger.error(f"Error setting up dashboard: {e}", exc_info=True)
         return None
+
+async def setup_telegram_bot(dashboard_url, active_resources):
+    """Setup and start Telegram bot"""
+    try:
+        logger.info("Starting Telegram bot...")
+        telegram_bot = TelegramBot(dashboard_url=dashboard_url)
+        active_resources['telegram_bot'] = telegram_bot
+        await run_telegram_bot(telegram_bot)
     except Exception as e:
-        logger.error(f"Error getting ngrok URL: {e}")
-        return None
+        logger.error(f"Error starting Telegram bot: {e}", exc_info=True)
+
+async def cleanup_resources(active_resources):
+    """Clean up all active resources"""
+    logger.info("Cleaning up resources...")
+    
+    # Close data processor connections
+    if 'data_processor' in active_resources:
+        try:
+            logger.info("Closing data processor connections...")
+            active_resources['data_processor'].close()
+        except Exception as e:
+            logger.error(f"Error closing data processor: {e}", exc_info=True)
+    
+    # Close ngrok tunnels
+    if active_resources['ngrok_tunnels']:
+        try:
+            logger.info("Closing ngrok tunnels...")
+            from pyngrok import ngrok
+            for tunnel in active_resources['ngrok_tunnels']:
+                ngrok.disconnect(tunnel.public_url)
+        except Exception as e:
+            logger.error(f"Error closing ngrok tunnels: {e}", exc_info=True)
+    
+    # Stop Telegram bot
+    if active_resources['telegram_bot']:
+        try:
+            logger.info("Stopping Telegram bot...")
+            try:
+                await active_resources['telegram_bot'].application.stop()
+            except RuntimeError as e:
+                if "This Application is not running" not in str(e):
+                    raise
+                logger.warning("Telegram bot was not running, no need to stop")
+        except Exception as e:
+            logger.error(f"Error stopping Telegram bot: {e}", exc_info=True)
+    
+    logger.info("Trading bot shutdown complete.")
 
 def main():
-    """Main function to run the bot"""
-    logger.info("Starting trading bot...")
+    """Main entry point for the trading bot"""
+    # Register signal handlers
+    signal.signal(signal.SIGINT, signal_handler)
+    signal.signal(signal.SIGTERM, signal_handler)
     
-    # Create data directories if they don't exist
-    data_dirs = ["data", "charts", "charts/crypto", "charts/forex", "journal"]
-    for directory in data_dirs:
-        Path(directory).mkdir(parents=True, exist_ok=True)
-    
-    # Check if we need to start ngrok
-    dashboard_url = DASHBOARD_URL
-    ngrok_process = None
-    
-    if "localhost" in DASHBOARD_URL or "127.0.0.1" in DASHBOARD_URL:
-        logger.info("Dashboard URL is set to localhost, starting ngrok...")
-        
-        # Start ngrok in a subprocess
-        port = 8080  # Use the port we set for Flask
-        if sys.platform == 'darwin':
-            # On macOS, avoid port 5000 which is used by AirPlay
-            port = 8080
-        
-        ngrok_command = ["ngrok", "http", str(port)]
-        ngrok_process = subprocess.Popen(ngrok_command, stdout=subprocess.PIPE)
-        logger.info(f"Started ngrok process (PID: {ngrok_process.pid})")
-        
-        # Wait for ngrok to start
-        time.sleep(2)
-        
-        # Get the public URL
-        ngrok_url = get_ngrok_url()
-        if ngrok_url:
-            dashboard_url = ngrok_url
-            logger.info(f"ngrok public URL: {ngrok_url}")
-            logger.info(f"Dashboard will be accessible at: {dashboard_url}")
-    
-    # Start the web dashboard in a separate thread
-    if DASHBOARD_ENABLED:
-        dashboard_thread = threading.Thread(target=run_dashboard, daemon=True)
-        dashboard_thread.start()
-        logger.info("Web dashboard started in background thread")
-    
-    # Add a scheduled task to update trade statuses
-    scheduler = BackgroundScheduler()
-    scheduler.add_job(update_trade_statuses, 'interval', hours=1)
-    scheduler.start()
-    logger.info("Trade status update scheduler started")
-    
-    # Initialize the Telegram bot with the correct dashboard URL
-    telegram_bot = TelegramBot(dashboard_url=dashboard_url)
-    
-    # Run the bot
-    telegram_bot.run()
-    
-    # Clean up ngrok process on exit
-    if ngrok_process:
-        ngrok_process.terminate()
-
+    # Run the async main function
+    asyncio.run(main_async())
 if __name__ == "__main__":
-    # Set a default event loop policy that works well with asyncio
-    if sys.platform == 'win32':
-        asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
-    
     main()

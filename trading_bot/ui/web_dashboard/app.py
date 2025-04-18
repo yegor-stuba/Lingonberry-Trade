@@ -7,9 +7,11 @@ import logging
 from flask import Flask, render_template, request, jsonify, send_from_directory
 from datetime import datetime, timedelta
 import json
+from flask_cors import CORS  # Add this import
 
 from trading_bot.journal.trade_journal import TradeJournal
 from trading_bot.data.data_processor import DataProcessor
+from trading_bot.backtesting.engine import BacktestEngine
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -138,3 +140,71 @@ def start_dashboard(host='0.0.0.0', port=5000, debug=False):
 
 if __name__ == '__main__':
     start_dashboard(debug=True)
+# Add authentication status endpoint to the web dashboard
+@app.route('/api/status')
+def get_status():
+    """API endpoint to get system status"""
+    # Check cTrader connection
+    from trading_bot.data.ctrader_data import CTraderData
+    ctrader = CTraderData()
+    
+    # Get data processor status
+    from trading_bot.data.data_processor import DataProcessor
+    data_processor = DataProcessor()
+    
+    status = {
+        'ctrader': {
+            'connected': ctrader.connected,
+            'authenticated': ctrader.authenticated
+        },
+        'system': {
+            'uptime': get_system_uptime(),
+            'version': '0.1.0'  # Update with your version
+        },
+        'data_sources': {
+            'csv_available': True,  # Always available
+            'ctrader_available': ctrader.connected and ctrader.authenticated,
+            'crypto_available': True  # Update based on your crypto provider
+        }
+    }
+    
+    return jsonify(status)
+
+def get_system_uptime():
+    """Get system uptime in seconds"""
+    import time
+    global start_time
+    if not hasattr(app, 'start_time'):
+        app.start_time = time.time()
+    return int(time.time() - app.start_time)
+
+@app.route('/telegram_journal')
+def telegram_journal():
+    """Render the journal page optimized for Telegram mini app"""
+    return render_template('telegram_journal.html')
+
+@app.route('/api/journal_summary')
+def get_journal_summary():
+    """API endpoint to get a summary of the journal for Telegram"""
+    user_id = request.args.get('user_id', type=int)
+    
+    # Get trades
+    closed_trades = trade_journal.get_closed_trades(user_id=user_id)
+    active_trades = trade_journal.get_active_trades(user_id=user_id)
+    pending_trades = trade_journal.get_pending_trades(user_id=user_id)
+    
+    # Get performance metrics
+    metrics = trade_journal.calculate_performance_metrics(user_id=user_id)
+    
+    # Create summary
+    summary = {
+        'metrics': metrics,
+        'trade_counts': {
+            'active': len(active_trades),
+            'pending': len(pending_trades),
+            'closed': len(closed_trades)
+        },
+        'recent_trades': closed_trades[-5:] if closed_trades else []
+    }
+    
+    return jsonify(summary)

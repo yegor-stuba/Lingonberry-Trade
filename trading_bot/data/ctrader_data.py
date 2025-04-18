@@ -79,12 +79,24 @@ TIMEFRAME_PERIODS = {
     "MN1": 14   # 1 month
 }
 
+_instance = None
+
 class CTraderData:
     """
-    Class for handling cTrader data operations
+    Class for handling cTrader data operations (Singleton pattern)
     """
+    def __new__(cls):
+        global _instance
+        if _instance is None:
+            _instance = super(CTraderData, cls).__new__(cls)
+            _instance._initialized = False
+        return _instance
+        
     def __init__(self):
-        """Initialize the cTrader data provider"""
+        """Initialize the cTrader data provider (only once)"""
+        if self._initialized:
+            return
+            
         self.client = Client(EndPoints.PROTOBUF_DEMO_HOST, EndPoints.PROTOBUF_PORT, TcpProtocol)
         self.connected = False
         self.authenticated = False
@@ -95,11 +107,14 @@ class CTraderData:
         self.pending_requests = {}
         self.data_dir = Path("data")
         self.data_dir.mkdir(exist_ok=True)
+        self._reconnect_scheduled = False
         
         # Set up callbacks
         self.client.setConnectedCallback(self._on_connected)
         self.client.setDisconnectedCallback(self._on_disconnected)
         self.client.setMessageReceivedCallback(self._on_message_received)
+        
+        self._initialized = True
 
     def connect(self) -> bool:
         """
@@ -117,9 +132,12 @@ class CTraderData:
         if not reactor.running:
             # Run the reactor in a separate thread
             import threading
-            reactor_thread = threading.Thread(target=lambda: reactor.run(installSignalHandlers=False))
-            reactor_thread.daemon = True
-            reactor_thread.start()
+            try:
+                reactor_thread = threading.Thread(target=lambda: reactor.run(installSignalHandlers=False))
+                reactor_thread.daemon = True
+                reactor_thread.start()
+            except Exception as e:
+                logger.error(f"Error starting reactor: {e}")
         
         # Give it a moment to connect
         time.sleep(2)
@@ -130,16 +148,15 @@ class CTraderData:
         """Disconnect from cTrader API"""
         logger.info("Disconnecting from cTrader API...")
         
-        # Stop the reactor if it's running
-        if reactor.running:
-            try:
-                reactor.callFromThread(reactor.stop)
-            except:
-                logger.warning("Reactor already stopped")
+        # Stop the client service
+        self.client.stopService()
         
+        # Don't stop the reactor, as it might be used by other instances
+        # Just mark as disconnected
         self.connected = False
         self.authenticated = False
         logger.info("Disconnected from cTrader API")
+
 
     def get_historical_data(self, symbol: str, timeframe: str, bars: int = 100) -> pd.DataFrame:
         """
@@ -153,90 +170,106 @@ class CTraderData:
         Returns:
             pd.DataFrame: OHLCV data
         """
-        if not self.authenticated:
-            logger.error("Not authenticated with cTrader API")
-            return pd.DataFrame()
-        
-        if timeframe not in TIMEFRAME_PERIODS:
-            logger.error(f"Invalid timeframe: {timeframe}")
-            return pd.DataFrame()
-        
-        # Normalize symbol name (remove .P, .F, etc. suffixes if present)
-        normalized_symbol = symbol.split('.')[0].upper()
-        
-        symbol_id = SYMBOL_IDS.get(normalized_symbol)
-        if not symbol_id:
-            logger.error(f"Unknown symbol: {symbol}")
+        try:
+            if not self.authenticated:
+                logger.error("Not authenticated with cTrader API")
+                logger.info("Attempting to load data from CSV as fallback")
+                return self.load_data(symbol, timeframe)
             
-            # Try to load from file as fallback
-            df = self.load_data(symbol, timeframe)
-            if not df.empty:
-                logger.info(f"Loaded {len(df)} rows from file for {symbol} {timeframe}")
-                return df
+            if timeframe not in TIMEFRAME_PERIODS:
+                logger.error(f"Invalid timeframe: {timeframe}")
+                logger.info("Available timeframes: {list(TIMEFRAME_PERIODS.keys())}")
+                return pd.DataFrame()
+            
+            # Normalize symbol name (remove .P, .F, etc. suffixes if present)
+            normalized_symbol = symbol.split('.')[0].upper()
+            
+            symbol_id = SYMBOL_IDS.get(normalized_symbol)
+            if not symbol_id:
+                logger.error(f"Unknown symbol: {symbol}")
+                logger.info(f"Available symbols: {list(SYMBOL_IDS.keys())}")
                 
-            return pd.DataFrame()
-        
-        # Calculate period in minutes for timestamp calculation
-        period_minutes = self._get_period_minutes(timeframe)
-        
-        now = int(time.time() * 1000)  # Current time in milliseconds
-        from_timestamp = now - (period_minutes * bars * 60 * 1000)  # Calculate start time
-        
-        logger.info(f"Requesting {bars} {timeframe} historical bars for {symbol}...")
-        logger.info(f"From: {datetime.fromtimestamp(from_timestamp/1000)}")
-        logger.info(f"To: {datetime.fromtimestamp(now/1000)}")
-        
-        # Create a deferred for this request
-        d = defer.Deferred()
-        request_id = f"{symbol}_{timeframe}_{int(time.time())}"
-        self.pending_requests[request_id] = {
-            "deferred": d,
-            "symbol": symbol,
-            "timeframe": timeframe
-        }
-        
-        # Send the request
-        trendbars_req = ProtoOAGetTrendbarsReq()
-        trendbars_req.ctidTraderAccountId = CTRADER_ACCOUNT_ID
-        trendbars_req.symbolId = symbol_id
-        trendbars_req.period = TIMEFRAME_PERIODS[timeframe]
-        trendbars_req.fromTimestamp = from_timestamp
-        trendbars_req.toTimestamp = now
-        
-        # Send the request and wait for response
-        self.client.send(trendbars_req)
-        
-        # Wait for the response with a timeout
-        timeout = 10  # seconds
-        start_time = time.time()
-        result = None
-        
-        while request_id in self.pending_requests and time.time() - start_time < timeout:
-            time.sleep(0.1)
-            if request_id in self.data_callbacks:
-                result = self.data_callbacks.pop(request_id)
+                # Try to load from file as fallback
+                logger.info(f"Attempting to load {symbol} data from CSV file")
+                df = self.load_data(symbol, timeframe)
+                if not df.empty:
+                    logger.info(f"Loaded {len(df)} rows from file for {symbol} {timeframe}")
+                    return df
+                    
+                return pd.DataFrame()
+            
+            # Calculate period in minutes for timestamp calculation
+            period_minutes = self._get_period_minutes(timeframe)
+            
+            now = int(time.time() * 1000)  # Current time in milliseconds
+            from_timestamp = now - (period_minutes * bars * 60 * 1000)  # Calculate start time
+            
+            logger.info(f"Requesting {bars} {timeframe} historical bars for {symbol}...")
+            logger.info(f"From: {datetime.fromtimestamp(from_timestamp/1000)}")
+            logger.info(f"To: {datetime.fromtimestamp(now/1000)}")
+            
+            # Create a deferred for this request
+            d = defer.Deferred()
+            request_id = f"{symbol}_{timeframe}_{int(time.time())}"
+            self.pending_requests[request_id] = {
+                "deferred": d,
+                "symbol": symbol,
+                "timeframe": timeframe
+            }
+            
+            # Send the request
+            trendbars_req = ProtoOAGetTrendbarsReq()
+            trendbars_req.ctidTraderAccountId = CTRADER_ACCOUNT_ID
+            trendbars_req.symbolId = symbol_id
+            trendbars_req.period = TIMEFRAME_PERIODS[timeframe]
+            trendbars_req.fromTimestamp = from_timestamp
+            trendbars_req.toTimestamp = now
+            
+            # Send the request and wait for response
+            self.client.send(trendbars_req)
+            
+            # Wait for the response with a timeout
+            timeout = 30  # seconds
+            start_time = time.time()
+            result = None
+            
+            while request_id in self.pending_requests and time.time() - start_time < timeout:
+                time.sleep(0.1)
+                if request_id in self.data_callbacks:
+                    result = self.data_callbacks.pop(request_id)
+                    self.pending_requests.pop(request_id, None)
+                    break
+            
+            if not result:
+                logger.error(f"Timeout waiting for historical data for {symbol} {timeframe}")
                 self.pending_requests.pop(request_id, None)
-                break
-        
-        if not result:
-            logger.error(f"Timeout waiting for historical data for {symbol} {timeframe}")
-            self.pending_requests.pop(request_id, None)
+                
+                # Try to load from file as fallback
+                logger.info(f"Attempting to load {symbol} data from CSV file after timeout")
+                df = self.load_data(symbol, timeframe)
+                if not df.empty:
+                    logger.info(f"Loaded {len(df)} rows from file for {symbol} {timeframe}")
+                    return df
+                    
+                return pd.DataFrame()
             
+            # Convert to DataFrame
+            df = self._convert_to_dataframe(result, symbol, timeframe)
+            
+            # Save to CSV
+            self._save_to_csv(df, symbol, timeframe)
+            
+            return df
+        except Exception as e:
+            logger.error(f"Error getting historical data for {symbol} {timeframe}: {e}", exc_info=True)
             # Try to load from file as fallback
+            logger.info(f"Attempting to load {symbol} data from CSV file after error")
             df = self.load_data(symbol, timeframe)
             if not df.empty:
                 logger.info(f"Loaded {len(df)} rows from file for {symbol} {timeframe}")
                 return df
-                
             return pd.DataFrame()
-        
-        # Convert to DataFrame
-        df = self._convert_to_dataframe(result, symbol, timeframe)
-        
-        # Save to CSV
-        self._save_to_csv(df, symbol, timeframe)
-        
-        return df
+
 
     def subscribe_to_live_data(self, symbol: str, timeframe: str, callback=None):
         """
@@ -412,6 +445,22 @@ class CTraderData:
         logger.info(f"Disconnected: {reason}")
         self.connected = False
         self.authenticated = False
+        
+        # Schedule reconnection if not already scheduled
+        if not self._reconnect_scheduled:
+            self._reconnect_scheduled = True
+            logger.info("Scheduling reconnection in 5 seconds...")
+            
+            # Use reactor.callLater for reconnection
+            from twisted.internet import reactor
+            reactor.callLater(5, self._reconnect)
+
+    def _reconnect(self):
+        """Attempt to reconnect to cTrader API"""
+        self._reconnect_scheduled = False
+        if not self.connected:
+            logger.info("Connecting to cTrader API...")
+            self.client.startService()
 
     def _on_message_received(self, client, message):
         """Callback when a message is received from cTrader API"""
@@ -691,6 +740,7 @@ class CTraderData:
         else:
             return 1  # Default to 1 minute
 
+    # Enhance the load_data method to be more robust
     def load_data(self, symbol: str, timeframe: str) -> pd.DataFrame:
         """
         Load data from CSV file
@@ -702,32 +752,41 @@ class CTraderData:
         Returns:
             pd.DataFrame: OHLCV data
         """
-        filename = self.data_dir / f"{symbol}_{timeframe}.csv"
+        # Try multiple file patterns
+        possible_filenames = [
+            self.data_dir / f"{symbol}_{timeframe}.csv",
+            self.data_dir / f"{symbol.replace('/', '')}_{timeframe}.csv",  # Try without slash for crypto
+            self.data_dir / f"{symbol.split('.')[0]}_{timeframe}.csv"  # Try without suffix
+        ]
         
-        if not filename.exists():
-            logger.warning(f"No data file found for {symbol} {timeframe}")
-            return pd.DataFrame()
+        for filename in possible_filenames:
+            if filename.exists():
+                try:
+                    # Skip the first two lines (headers)
+                    df = pd.read_csv(filename, skiprows=2, header=None, sep=' ')
+                    
+                    # Set column names
+                    if len(df.columns) >= 7:
+                        df.columns = ['date', 'time', 'open', 'high', 'low', 'close', 'volume']
+                        
+                        # Combine date and time
+                        df['timestamp'] = pd.to_datetime(df['date'] + ' ' + df['time'])
+                        df.drop(['date', 'time'], axis=1, inplace=True)
+                        
+                        # Set timestamp as index
+                        df.set_index('timestamp', inplace=True)
+                        
+                        logger.info(f"Loaded {len(df)} rows from {filename}")
+                        return df
+                    else:
+                        logger.warning(f"CSV file {filename} has incorrect format")
+                except Exception as e:
+                    logger.error(f"Error loading data from {filename}: {e}")
         
-        try:
-            # Skip the first two lines (headers)
-            df = pd.read_csv(filename, skiprows=2, header=None, sep=' ')
-            
-            # Set column names
-            df.columns = ['date', 'time', 'open', 'high', 'low', 'close', 'volume']
-            
-            # Combine date and time
-            df['timestamp'] = pd.to_datetime(df['date'] + ' ' + df['time'])
-            df.drop(['date', 'time'], axis=1, inplace=True)
-            
-            # Set timestamp as index
-            df.set_index('timestamp', inplace=True)
-            
-            logger.info(f"Loaded {len(df)} rows from {filename}")
-            return df
-        
-        except Exception as e:
-            logger.error(f"Error loading data from {filename}: {e}")
-            return pd.DataFrame()
+        # If we get here, none of the files worked
+        logger.warning(f"No data file found for {symbol} {timeframe}")
+        return pd.DataFrame()
+
 
     def update_data(self, symbol: str, timeframe: str, bars: int = 100) -> pd.DataFrame:
         """

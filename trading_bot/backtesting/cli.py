@@ -6,139 +6,123 @@ import argparse
 import asyncio
 import logging
 import json
-from datetime import datetime
-from pathlib import Path
+import os
+from typing import List, Dict
+import pandas as pd
+import matplotlib.pyplot as plt
 
-from trading_bot.backtesting.backtest import Backtester
-from trading_bot.config import settings
+from trading_bot.backtesting.engine import BacktestEngine
 
 logger = logging.getLogger(__name__)
 
-async def main():
-    """Main function for the CLI"""
-    parser = argparse.ArgumentParser(description='Trading Bot Backtester')
+async def run_backtest(symbol: str, timeframes: List[str], period: str, market_type: str,
+                     initial_capital: float, risk_per_trade: float, output_dir: str):
+    """
+    Run a backtest and save results
     
-    # Required arguments
-    parser.add_argument('--market', type=str, required=True, choices=['forex', 'crypto', 'indices', 'metals'],
-                        help='Market type')
-    parser.add_argument('--symbol', type=str, required=True,
-                        help='Trading symbol')
-    parser.add_argument('--timeframe', type=str, required=True,
-                        help='Timeframe for analysis')
+    Args:
+        symbol (str): Trading symbol
+        timeframes (list): List of timeframes
+        period (str): Time period
+        market_type (str): Market type
+        initial_capital (float): Initial capital
+        risk_per_trade (float): Risk percentage per trade
+        output_dir (str): Output directory
+    """
+    # Create backtest engine
+    engine = BacktestEngine()
     
-    # Optional arguments
-    parser.add_argument('--start-date', type=str, help='Start date (YYYY-MM-DD)')
-    parser.add_argument('--end-date', type=str, help='End date (YYYY-MM-DD)')
-    parser.add_argument('--capital', type=float, default=10000.0, help='Initial capital')
-    parser.add_argument('--risk', type=float, default=1.0, help='Risk percentage per trade')
-    parser.add_argument('--optimize', action='store_true', help='Run parameter optimization')
-    parser.add_argument('--output', type=str, help='Output file for results')
-    
-    args = parser.parse_args()
-    
-    # Initialize backtester
-    backtester = Backtester()
-    
-    # Check if symbol is available
-    available_symbols = backtester.get_available_symbols(args.market)
-    if args.symbol not in available_symbols:
-        print(f"Symbol {args.symbol} not available for {args.market}. Available symbols: {available_symbols}")
-        return
-    
-    # Check if timeframe is available
-    available_timeframes = backtester.get_available_timeframes(args.market, args.symbol)
-    if args.timeframe not in available_timeframes:
-        print(f"Timeframe {args.timeframe} not available for {args.symbol}. Available timeframes: {available_timeframes}")
-        return
-    
-    print(f"Running backtest for {args.symbol} on {args.timeframe} timeframe...")
-    
-    # Run backtest or optimization
-    if args.optimize:
-        # Define parameter grid for optimization
-        param_grid = {
-            'min_strength': [60, 70, 80],
-            'min_rr': [1.5, 2.0, 2.5],
-            'risk_per_trade': [0.5, 1.0, 2.0]
-        }
-        
-        print("Running parameter optimization...")
-        results = await backtester.optimize_strategy(
-            market_type=args.market,
-            symbol=args.symbol,
-            timeframe=args.timeframe,
-            start_date=args.start_date,
-            end_date=args.end_date,
-            initial_capital=args.capital,
-            param_grid=param_grid
-        )
-    else:
-        results = await backtester.run_backtest(
-            market_type=args.market,
-            symbol=args.symbol,
-            timeframe=args.timeframe,
-            start_date=args.start_date,
-            end_date=args.end_date,
-            initial_capital=args.capital,
-            risk_per_trade=args.risk
-        )
+    # Run multi-timeframe backtest
+    results = await engine.run_multi_timeframe_backtest(
+        symbol=symbol,
+        timeframes=timeframes,
+        period=period,
+        market_type=market_type,
+        initial_capital=initial_capital,
+        risk_per_trade=risk_per_trade
+    )
     
     if not results.get('success', False):
-        print(f"Error: {results.get('message', 'Unknown error')}")
+        logger.error(f"Backtest failed: {results.get('message', 'Unknown error')}")
         return
     
+    # Create output directory if it doesn't exist
+    os.makedirs(output_dir, exist_ok=True)
+    
+    # Save results as JSON
+    results_copy = results.copy()
+    results_copy.pop('df', None)  # Remove DataFrame from results
+    
+    with open(os.path.join(output_dir, f"{symbol}_{period}_results.json"), 'w') as f:
+        # Convert dates to strings
+        for trade in results_copy['trades']:
+            trade['entry_date'] = str(trade['entry_date'])
+            trade['exit_date'] = str(trade['exit_date'])
+        
+        json.dump(results_copy, f, indent=2)
+    
+    # Generate and save equity curve
+    plt.figure(figsize=(12, 6))
+    plt.plot(results['equity'])
+    plt.title(f"Equity Curve - {symbol} ({', '.join(timeframes)})")
+    plt.xlabel("Trade Number")
+    plt.ylabel("Equity")
+    plt.grid(True)
+    plt.savefig(os.path.join(output_dir, f"{symbol}_{period}_equity.png"))
+    
+    # Generate and save trade chart
+    chart_buf = await engine.generate_chart(with_analysis=True)
+    if chart_buf:
+        with open(os.path.join(output_dir, f"{symbol}_{period}_chart.png"), 'wb') as f:
+            f.write(chart_buf.getvalue())
+    
     # Print summary
-    print("\nBacktest Summary:")
-    print(f"Symbol: {results['symbol']}")
-    print(f"Timeframe: {results['timeframe']}")
-    print(f"Period: {results['start_date']} to {results['end_date']}")
-    print(f"Initial Capital: ${results['initial_capital']:,.2f}")
-    print(f"Final Capital: ${results['final_capital']:,.2f}")
-    print(f"Total Return: {results['total_return_pct']:.2f}%")
+    print("\n===== BACKTEST RESULTS =====")
+    print(f"Symbol: {symbol}")
+    print(f"Timeframes: {', '.join(timeframes)}")
+    print(f"Period: {period}")
+    print(f"Initial Capital: ${initial_capital:.2f}")
+    print(f"Final Capital: ${results['final_capital']:.2f}")
+    print(f"Profit/Loss: ${results['profit']:.2f} ({results['profit_pct']:.2f}%)")
     print(f"Total Trades: {results['trade_count']}")
     print(f"Win Rate: {results['win_rate']:.2f}%")
     print(f"Profit Factor: {results['profit_factor']:.2f}")
-    print(f"Max Drawdown: {results['max_drawdown_pct']:.2f}%")
-    
-    # Save results to file if specified
-    if args.output:
-        output_path = Path(args.output)
-        
-        # Create directory if it doesn't exist
-        output_path.parent.mkdir(parents=True, exist_ok=True)
-        
-        # Remove binary data (charts) before saving to JSON
-        results_copy = results.copy()
-        if 'charts' in results_copy:
-            del results_copy['charts']
-        
-        # Save to file
-        with open(output_path, 'w') as f:
-            json.dump(results_copy, f, indent=4, default=str)
-        
-        print(f"\nResults saved to {output_path}")
-    
-    # Generate report with charts
-    report = backtester.generate_report(results)
-    
-    # Save charts if output is specified
-    if args.output and report.get('success', False):
-        output_dir = Path(args.output).parent
-        
-        # Save charts
-        for chart_name, chart_data in report.get('charts', {}).items():
-            if chart_data:
-                chart_path = output_dir / f"{chart_name}.png"
-                with open(chart_path, 'wb') as f:
-                    f.write(chart_data.getvalue())
-                print(f"Chart saved to {chart_path}")
+    print(f"Average RR: {results['avg_rr']:.2f}")
+    print("============================\n")
 
-if __name__ == '__main__':
+def main():
+    """Main function for CLI"""
+    parser = argparse.ArgumentParser(description="Run backtests with the trading bot")
+    
+    parser.add_argument("--symbol", type=str, required=True, help="Trading symbol (e.g., EURUSD)")
+    parser.add_argument("--timeframes", type=str, required=True, help="Comma-separated list of timeframes (e.g., 1h,4h,1d)")
+    parser.add_argument("--period", type=str, default="1y", help="Time period (e.g., 1m, 3m, 6m, 1y, 2y)")
+    parser.add_argument("--market", type=str, default="forex", help="Market type (forex, crypto, indices, metals)")
+    parser.add_argument("--capital", type=float, default=10000.0, help="Initial capital")
+    parser.add_argument("--risk", type=float, default=1.0, help="Risk percentage per trade")
+    parser.add_argument("--output", type=str, default="./backtest_results", help="Output directory")
+    
+    args = parser.parse_args()
+    
+    # Parse timeframes
+    timeframes = args.timeframes.split(',')
+    
     # Set up logging
     logging.basicConfig(
         level=logging.INFO,
         format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
     )
     
-    # Run the main function
-    asyncio.run(main())
+    # Run backtest
+    asyncio.run(run_backtest(
+        symbol=args.symbol,
+        timeframes=timeframes,
+        period=args.period,
+        market_type=args.market,
+        initial_capital=args.capital,
+        risk_per_trade=args.risk,
+        output_dir=args.output
+    ))
+
+if __name__ == "__main__":
+    main()

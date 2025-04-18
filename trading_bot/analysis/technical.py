@@ -95,6 +95,16 @@ class TechnicalAnalyzer:
                 'signals': []
             }
     
+    def _check_candlestick_patterns(self, df, patterns):
+        """Check for various candlestick patterns"""
+        # This method should call the individual pattern checks
+        self._check_doji(df, patterns)
+        self._check_engulfing(df, patterns)
+        self._check_hammer_shooting_star(df, patterns)
+        self._check_morning_evening_star(df, patterns)
+        self._check_three_candles(df, patterns)
+
+
     def calculate_indicators(self, df: pd.DataFrame) -> Dict:
         """
         Calculate technical indicators
@@ -180,6 +190,7 @@ class TechnicalAnalyzer:
             'lower': lower,
             'width': width
         }
+
     
     def _calculate_rsi(self, df: pd.DataFrame, period: int = 14) -> pd.Series:
         """Calculate Relative Strength Index"""
@@ -199,6 +210,7 @@ class TechnicalAnalyzer:
         rsi = 100 - (100 / (1 + rs))
         
         return rsi
+
     
     def _calculate_macd(self, df: pd.DataFrame, fast_period: int = 12, slow_period: int = 26, signal_period: int = 9) -> Dict[str, pd.Series]:
         """Calculate MACD"""
@@ -228,16 +240,18 @@ class TechnicalAnalyzer:
             'd': d
         }
     
-    def _calculate_atr(self, df: pd.DataFrame, period: int = 14) -> pd.Series:
+    def _calculate_atr(self, df, period=14):
         """Calculate Average True Range"""
-        high_low = df['high'] - df['low']
-        high_close = (df['high'] - df['close'].shift()).abs()
-        low_close = (df['low'] - df['close'].shift()).abs()
-        
-        ranges = pd.concat([high_low, high_close, low_close], axis=1)
-        true_range = ranges.max(axis=1)
-        
-        return true_range.rolling(window=period).mean()
+        tr1 = df['high'] - df['low']
+        tr2 = abs(df['high'] - df['close'].shift())
+        tr3 = abs(df['low'] - df['close'].shift())
+        tr = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
+        atr = tr.rolling(period).mean()
+        # Fill NaN values with the first valid value
+        atr = atr.bfill()
+        return atr
+
+
     
     def _calculate_ichimoku(self, df: pd.DataFrame) -> Dict[str, pd.Series]:
         """Calculate Ichimoku Cloud"""
@@ -519,7 +533,7 @@ class TechnicalAnalyzer:
         
         return signals
     
-    def determine_bias(self, df: pd.DataFrame, indicators: Dict, signals: List[Dict]) -> str:
+    def determine_bias(self, df: pd.DataFrame, indicators: Dict, signals: List[Dict]) -> Dict:
         """
         Determine overall market bias
         
@@ -529,7 +543,7 @@ class TechnicalAnalyzer:
             signals (list): Generated signals
             
         Returns:
-            str: Market bias ('bullish', 'bearish', or 'neutral')
+            dict: Market bias details including direction, strength and confidence
         """
         # Count bullish and bearish signals
         bullish_count = sum(1 for signal in signals if signal['type'] == 'bullish')
@@ -551,18 +565,51 @@ class TechnicalAnalyzer:
         price_above_ma50 = df['close'].iloc[-1] > indicators['sma50'].iloc[-1]
         price_above_ma200 = df['close'].iloc[-1] > indicators['sma200'].iloc[-1]
         
-        # Determine bias based on multiple factors
+        # Calculate overall strength (0-100)
+        total_strength = bullish_strength + bearish_strength
+        strength = 0
+        
+        # Determine bias and calculate strength
         if (bullish_strength > bearish_strength * 1.5 or 
             (ma_trend == 'bullish' and price_above_ma20 and price_above_ma50) or
             (bullish_count > bearish_count * 2)):
-            return 'bullish'
+            bias = 'bullish'
+            strength = min(100, int((bullish_strength / (total_strength or 1)) * 100))
         elif (bearish_strength > bullish_strength * 1.5 or 
               (ma_trend == 'bearish' and not price_above_ma20 and not price_above_ma50) or
               (bearish_count > bullish_count * 2)):
-            return 'bearish'
+            bias = 'bearish'
+            strength = min(100, int((bearish_strength / (total_strength or 1)) * 100))
         else:
-            return 'neutral'
-    
+            bias = 'neutral'
+            strength = 50
+        
+        # Calculate confidence score (0-100)
+        confidence = 0
+        
+        # MA alignment contribution (max 30)
+        if ma_trend == bias:
+            confidence += 30
+        
+        # Signal count contribution (max 30)
+        signal_ratio = max(bullish_count, bearish_count) / (bullish_count + bearish_count) if (bullish_count + bearish_count) > 0 else 0
+        confidence += int(signal_ratio * 30)
+        
+        # Price position contribution (max 40)
+        ma_alignment = sum([price_above_ma20, price_above_ma50, price_above_ma200])
+        if bias == 'bullish':
+            confidence += int((ma_alignment / 3) * 40)
+        elif bias == 'bearish':
+            confidence += int(((3 - ma_alignment) / 3) * 40)
+        else:
+            confidence += 20
+            
+        return {
+            'direction': bias,  # 'bullish', 'bearish', or 'neutral'
+            'strength': strength,
+            'confidence': confidence
+        }
+
     def identify_key_levels(self, df: pd.DataFrame) -> List[Dict]:
         """
         Identify key support and resistance levels
@@ -1362,11 +1409,15 @@ class TechnicalAnalyzer:
             # Calculate position size
             position_size = risk_amount / pip_risk if pip_risk > 0 else 0
             
+            # Calculate risk-reward (default to 0 since we don't have take_profit)
+            risk_reward = 0
+            
             return {
                 'position_size': position_size,
                 'risk_amount': risk_amount,
                 'pip_risk': pip_risk,
-                'risk_percentage': risk_percentage
+                'risk_percentage': risk_percentage,
+                'risk_reward': risk_reward  # Add this field
             }
             
         except Exception as e:
@@ -1375,8 +1426,10 @@ class TechnicalAnalyzer:
                 'position_size': 0,
                 'risk_amount': 0,
                 'pip_risk': 0,
-                'risk_percentage': risk_percentage
+                'risk_percentage': risk_percentage,
+                'risk_reward': 0  # Add this field
             }
+
 
     def multi_timeframe_analysis(self, dfs: Dict[str, pd.DataFrame], symbol: str) -> Dict:
         """

@@ -17,3 +17,5 @@ __pycache__/
 # Virtual environment
 venv/
 credentials.py
+stable_venv/
+ngrok.yaml

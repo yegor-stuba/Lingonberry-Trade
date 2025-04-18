@@ -54,16 +54,7 @@ class SentimentAnalyzer:
                     self.sentiment_model = None
 
     async def analyze_news_sentiment(self, symbol: str, market_type: str = 'forex') -> Dict:
-        """
-        Analyze sentiment from financial news
-        
-        Args:
-            symbol (str): Trading symbol
-            market_type (str): Market type ('forex', 'crypto', 'indices', 'metals')
-            
-        Returns:
-            dict: Sentiment analysis results
-        """
+        """Analyze sentiment from financial news"""
         try:
             # Get news articles
             news_articles = await self._fetch_news(symbol, market_type)
@@ -247,6 +238,7 @@ class SentimentAnalyzer:
             }
         ]
 
+
     
     def _simple_sentiment_analysis(self, text: str) -> tuple[float, str]:
         """
@@ -298,6 +290,7 @@ class SentimentAnalyzer:
             sentiment_label = 'neutral'
         
         return sentiment_score, sentiment_label    
+ 
     async def analyze_social_sentiment(self, symbol: str, market_type: str = 'forex') -> Dict:
         """
         Analyze sentiment from social media
@@ -522,3 +515,107 @@ class SentimentAnalyzer:
         except Exception as e:
             logger.error(f"Error finding sentiment-based trade setups: {e}")
             return []
+
+    def _analyze_sentiment(self, text: str) -> Dict:
+        """Analyze sentiment of a text"""
+        if self.use_transformers and self.sentiment_model:
+            # Use transformers for more accurate sentiment
+            result = self.sentiment_model(text)[0]
+            label = result['label'].lower()
+            score = result['score']
+            
+            # Convert label to numeric score (-1 to 1)
+            if label == 'positive':
+                numeric_score = score
+            elif label == 'negative':
+                numeric_score = -score
+            else:
+                numeric_score = 0
+        else:
+            # Simple rule-based sentiment
+            numeric_score, label = self._simple_sentiment_analysis(text)
+            score = abs(numeric_score)
+        
+            # Map 'positive' to 'bullish', 'negative' to 'bearish'
+        sentiment = 'bullish' if label == 'positive' else 'bearish' if label == 'negative' else 'neutral'
+        
+        return {
+            'label': label,
+            'sentiment': sentiment,  # Add this line
+            'score': score,
+            'numeric_score': numeric_score
+        }
+
+    def _map_sentiment_score_to_label(self, score):
+        """Map a sentiment score to a label"""
+        if score > 0.2:
+            return 'positive'
+        elif score < -0.2:
+            return 'negative'
+        else:
+            return 'neutral'
+
+    def _calculate_sentiment_confidence(self, sentiment_labels: List[str]) -> float:
+        """Calculate confidence based on consistency of sentiment labels"""
+        if not isinstance(sentiment_labels, list):
+            return 0.0
+    
+        if not sentiment_labels:
+            return 0.0
+        
+        # Count occurrences of each label
+        label_counts = {}
+        for label in sentiment_labels:
+            if label not in label_counts:
+                label_counts[label] = 0
+            label_counts[label] += 1
+        
+        # Find the most common label
+        dominant_count = max(label_counts.values()) if label_counts else 0
+        
+        # Calculate confidence as the proportion of the dominant label
+        confidence = dominant_count / len(sentiment_labels) if sentiment_labels else 0
+        
+        return confidence
+
+    def _get_market_keywords(self, market_type):
+        """Get keywords for a specific market type"""
+        keywords = {
+            'forex': ['currency', 'forex', 'fx', 'exchange rate'],
+            'crypto': ['bitcoin', 'cryptocurrency', 'crypto', 'blockchain'],
+            'indices': ['index', 'stock market', 'equities'],
+            'metals': ['gold', 'silver', 'precious metals', 'commodities']
+        }
+        return keywords.get(market_type, ['market', 'trading', 'finance'])  # Return default keywords
+
+
+    def _generate_synthetic_social_posts(self, symbol: str, market_type: str = 'forex') -> List[Dict]:
+        """Generate synthetic social media posts when API fails"""
+        logger.info(f"Generating synthetic social posts for {symbol}")
+        
+        # Create a few generic social posts
+        current_time = datetime.now().isoformat()
+        
+        return [
+            {
+                'text': f"Just bought some {symbol}! Looking bullish to me. #trading",
+                'source': "Twitter",
+                'timestamp': current_time,
+                'likes': 15,
+                'retweets': 3
+            },
+            {
+                'text': f"{symbol} might be heading down soon. Charts don't look good. #trading #analysis",
+                'source': "Twitter",
+                'timestamp': current_time,
+                'likes': 8,
+                'retweets': 1
+            },
+            {
+                'text': f"What do you guys think about {symbol}? I'm neutral for now.",
+                'source': "Reddit",
+                'timestamp': current_time,
+                'upvotes': 5,
+                'comments': 3
+            }
+        ]

@@ -24,29 +24,47 @@ class CombinedStrategy(Strategy):
     
     def __init__(self):
         """Initialize the combined strategy"""
-        super().__init__()
+        super().__init__(name="combined")  # Add name parameter
         self.smc_strategy = SMCStrategy()
         self.ict_strategy = ICTStrategy()
         self.technical_analyzer = TechnicalAnalyzer()
         self.sentiment_analyzer = SentimentAnalyzer()
         
         logger.info("Initialized combined strategy with SMC, ICT, Technical, and Sentiment analysis")
-    
-    async def analyze_with_sentiment(self, df: pd.DataFrame, symbol: str, timeframe: str, market_type: str = 'forex') -> Dict:
+
+
+    def generate_signals(self, symbol: str, df: pd.DataFrame, timeframe: str) -> List[Dict]:
         """
-        Analyze with sentiment data included
+        Generate trading signals for a symbol
         
         Args:
-            df (pd.DataFrame): OHLCV data
             symbol (str): Trading symbol
+            df (pd.DataFrame): OHLCV data
             timeframe (str): Timeframe
-            market_type (str): Market type ('forex', 'crypto', 'indices', 'metals')
             
         Returns:
-            dict: Analysis results
+            list: List of trading signals
         """
+        # Get analysis
+        analysis = self.analyze(df, symbol, timeframe)
+        
+        # Extract signals from analysis
+        signals = analysis.get('signals', [])
+        
+        # Extract trade setups
+        trade_setups = analysis.get('trade_setups', [])
+        
+        # Convert trade setups to signals format if needed
+        for setup in trade_setups:
+            if setup not in signals:
+                signals.append(setup)
+        
+        return signals
+    
+    async def analyze_with_sentiment(self, df: pd.DataFrame, symbol: str, timeframe: str, market_type: str = 'forex') -> Dict:
         # Get sentiment analysis
-        sentiment_data = await self.sentiment_analyzer.get_combined_sentiment(symbol, market_type)
+        sentiment_future = self.sentiment_analyzer.get_combined_sentiment(symbol, market_type)
+        sentiment_data = await sentiment_future  # Await the future to get the actual data
         
         # Get regular analysis
         analysis = self.analyze(df, symbol, timeframe)
@@ -58,20 +76,22 @@ class CombinedStrategy(Strategy):
         self._adjust_signals_with_sentiment(analysis, sentiment_data)
         
         return analysis
-    
+
+
     def analyze(self, df: pd.DataFrame, symbol: str, timeframe: str) -> Dict:
-        """
-        Analyze price data using multiple strategies
-        
-        Args:
-            df (pd.DataFrame): OHLCV data
-            symbol (str): Trading symbol
-            timeframe (str): Timeframe
-            
-        Returns:
-            dict: Analysis results
-        """
+        """Analyze price data using multiple strategies"""
         logger.info(f"Analyzing {symbol} on {timeframe} with combined strategy")
+        
+        # Check for empty dataframe
+        if df is None or df.empty:
+            logger.warning(f"Empty dataframe provided for {symbol} on {timeframe}")
+            return {
+                'symbol': symbol,
+                'timeframe': timeframe,
+                'bias': 'neutral',
+                'signals': [],
+                'trade_setups': []
+            }
         
         # Get analysis from each component
         smc_analysis = self.smc_strategy.analyze(df, symbol, timeframe)
@@ -153,18 +173,16 @@ class CombinedStrategy(Strategy):
         """
         high_prob_setups = []
         
-        # Filter signals by strength and alignment with bias
-        strong_signals = [s for s in signals if s.get('strength', 0) >= 70]
-        aligned_signals = [s for s in strong_signals if 
-                          (s.get('type') == 'bullish' and bias == 'bullish') or 
-                          (s.get('type') == 'bearish' and bias == 'bearish')]
+        # Filter signals by strength - use a lower threshold to get more signals
+        strong_signals = [s for s in signals if s.get('strength', 0) >= 60]
         
-        # If we have aligned signals, use them; otherwise use strong signals
-        filtered_signals = aligned_signals if aligned_signals else strong_signals
+        # If we don't have any strong signals, use all signals
+        if not strong_signals:
+            strong_signals = signals
         
         # Group signals by type
-        bullish_signals = [s for s in filtered_signals if s.get('type') == 'bullish']
-        bearish_signals = [s for s in filtered_signals if s.get('type') == 'bearish']
+        bullish_signals = [s for s in strong_signals if s.get('type') == 'bullish' or s.get('direction') == 'BUY']
+        bearish_signals = [s for s in strong_signals if s.get('type') == 'bearish' or s.get('direction') == 'SELL']
         
         # Current price
         current_price = df.iloc[-1]['close'] if not df.empty else 0
@@ -174,37 +192,44 @@ class CombinedStrategy(Strategy):
         
         # Process bullish setups
         if bullish_signals and (bias == 'bullish' or bias == 'neutral'):
-            # Find nearest support for stop loss
+            # Find supports for stop loss
             supports = [level for level in key_levels if level['type'] == 'support' and level['price'] < current_price]
-            if supports:
-                # Use the strongest support level
-                strongest_support = max(supports, key=lambda x: x.get('strength', 0))
-                
-                # Find resistance levels for take profit
-                resistances = [level for level in key_levels if level['type'] == 'resistance' and level['price'] > current_price]
-                if resistances:
-                    # Use the strongest resistance level
-                    strongest_resistance = max(resistances, key=lambda x: x.get('strength', 0))
-                    
+            
+            # If no supports found, create one based on recent lows
+            if not supports:
+                recent_low = df['low'].iloc[-20:].min()
+                supports = [{'type': 'support', 'price': recent_low, 'strength': 60}]
+            
+            # Find resistances for take profit
+            resistances = [level for level in key_levels if level['type'] == 'resistance' and level['price'] > current_price]
+            
+            # If no resistances found, create one based on recent highs
+            if not resistances:
+                recent_high = df['high'].iloc[-20:].max()
+                resistances = [{'type': 'resistance', 'price': recent_high * 1.01, 'strength': 60}]
+            
+            # Create multiple trade setups with different risk-reward ratios
+            for support in supports[:2]:  # Use top 2 supports
+                for resistance in resistances[:2]:  # Use top 2 resistances
                     # Calculate entry, stop loss, and take profit
                     entry = current_price
-                    stop_loss = strongest_support['price'] * 0.998  # Just below support
-                    take_profit = strongest_resistance['price']
+                    stop_loss = support['price'] * 0.998  # Just below support
+                    take_profit = resistance['price']
                     
                     # Calculate risk-reward ratio
                     risk = entry - stop_loss
                     reward = take_profit - entry
                     risk_reward = reward / risk if risk > 0 else 0
                     
-                    # Only include setups with RR >= 3
-                    if risk_reward >= 3:
+                    # Only include setups with RR >= 2
+                    if risk_reward >= 2:
                         # Get the strongest signal
                         strongest_signal = max(bullish_signals, key=lambda x: x.get('strength', 0))
                         
                         high_prob_setups.append({
                             'symbol': symbol,
                             'direction': 'BUY',
-                            'entry': entry,
+                            'entry_price': entry,
                             'stop_loss': stop_loss,
                             'take_profit': take_profit,
                             'risk_reward': risk_reward,
@@ -215,37 +240,44 @@ class CombinedStrategy(Strategy):
         
         # Process bearish setups
         if bearish_signals and (bias == 'bearish' or bias == 'neutral'):
-            # Find nearest resistance for stop loss
+            # Find resistances for stop loss
             resistances = [level for level in key_levels if level['type'] == 'resistance' and level['price'] > current_price]
-            if resistances:
-                # Use the strongest resistance level
-                strongest_resistance = max(resistances, key=lambda x: x.get('strength', 0))
-                
-                # Find support levels for take profit
-                supports = [level for level in key_levels if level['type'] == 'support' and level['price'] < current_price]
-                if supports:
-                    # Use the strongest support level
-                    strongest_support = max(supports, key=lambda x: x.get('strength', 0))
-                    
+            
+            # If no resistances found, create one based on recent highs
+            if not resistances:
+                recent_high = df['high'].iloc[-20:].max()
+                resistances = [{'type': 'resistance', 'price': recent_high, 'strength': 60}]
+            
+            # Find supports for take profit
+            supports = [level for level in key_levels if level['type'] == 'support' and level['price'] < current_price]
+            
+            # If no supports found, create one based on recent lows
+            if not supports:
+                recent_low = df['low'].iloc[-20:].min()
+                supports = [{'type': 'support', 'price': recent_low * 0.999, 'strength': 60}]
+            
+            # Create multiple trade setups with different risk-reward ratios
+            for resistance in resistances[:2]:  # Use top 2 resistances
+                for support in supports[:2]:  # Use top 2 supports
                     # Calculate entry, stop loss, and take profit
                     entry = current_price
-                    stop_loss = strongest_resistance['price'] * 1.002  # Just above resistance
-                    take_profit = strongest_support['price']
+                    stop_loss = resistance['price'] * 1.002  # Just above resistance
+                    take_profit = support['price']
                     
                     # Calculate risk-reward ratio
                     risk = stop_loss - entry
                     reward = entry - take_profit
                     risk_reward = reward / risk if risk > 0 else 0
                     
-                    # Only include setups with RR >= 3
-                    if risk_reward >= 3:
+                    # Only include setups with RR >= 2
+                    if risk_reward >= 2:
                         # Get the strongest signal
                         strongest_signal = max(bearish_signals, key=lambda x: x.get('strength', 0))
                         
                         high_prob_setups.append({
                             'symbol': symbol,
                             'direction': 'SELL',
-                            'entry': entry,
+                            'entry_price': entry,
                             'stop_loss': stop_loss,
                             'take_profit': take_profit,
                             'risk_reward': risk_reward,
@@ -254,7 +286,11 @@ class CombinedStrategy(Strategy):
                             'signals': [s.get('description', '') for s in bearish_signals[:3]]
                         })
         
+        # Sort setups by risk-reward ratio
+        high_prob_setups.sort(key=lambda x: x.get('risk_reward', 0), reverse=True)
+        
         return high_prob_setups
+
     
     def _extract_key_levels(self, df: pd.DataFrame) -> List[Dict]:
         """
@@ -576,3 +612,170 @@ class CombinedStrategy(Strategy):
         }
         
         return trade_setup
+
+    def calculate_position_size(self, account_size: float, risk_percentage: float, 
+                            entry_price: float, stop_loss: float, symbol: str = None) -> float:
+        """Calculate optimal position size based on risk parameters"""
+        return self.technical_analyzer.calculate_optimal_position_size(
+            account_size, risk_percentage, entry_price, stop_loss
+        ).get('position_size', 0)
+
+
+    def calculate_risk_reward(self, entry_price: float, stop_loss: float, 
+                         take_profit: float) -> float:
+        """Calculate risk-reward ratio for a trade setup"""
+        risk = abs(entry_price - stop_loss)
+        reward = abs(entry_price - take_profit)
+        return reward / risk if risk > 0 else 0
+
+    def _identify_smart_money_concepts(self, df: pd.DataFrame) -> Dict:
+        """Identify Smart Money Concepts elements in the chart"""
+        return {
+            'order_blocks': self._identify_order_blocks(df),
+            'fair_value_gaps': self._identify_fair_value_gaps(df),
+            'liquidity_levels': self._identify_liquidity_levels(df),
+            'market_structure': []  # Add market structure analysis
+        }
+
+    def _identify_ict_concepts(self, df: pd.DataFrame) -> Dict:
+        """Identify ICT concepts in the chart"""
+        return {
+            'premium_discount': [],
+            'optimal_trade_entries': [],
+            'breaker_blocks': [],
+            'inducement_points': []
+        }
+
+    def _identify_liquidity_levels(self, df: pd.DataFrame) -> List[Dict]:
+        """Identify liquidity levels in the chart"""
+        liquidity_levels = []
+        
+        # Look for potential liquidity levels above swing highs
+        for i in range(5, len(df) - 5):
+            # Check for swing high
+            if all(df['high'].iloc[i] > df['high'].iloc[i-j] for j in range(1, 5)) and \
+            all(df['high'].iloc[i] > df['high'].iloc[i+j] for j in range(1, 5)):
+                liquidity_levels.append({
+                    'type': 'buy_side_liquidity',
+                    'price': df['high'].iloc[i] * 1.001,  # Just above swing high
+                    'strength': 70
+                })
+        
+        # Look for potential liquidity levels below swing lows
+        for i in range(5, len(df) - 5):
+            # Check for swing low
+            if all(df['low'].iloc[i] < df['low'].iloc[i-j] for j in range(1, 5)) and \
+            all(df['low'].iloc[i] < df['low'].iloc[i+j] for j in range(1, 5)):
+                liquidity_levels.append({
+                    'type': 'sell_side_liquidity',
+                    'price': df['low'].iloc[i] * 0.999,  # Just below swing low
+                    'strength': 70
+                })
+        
+        return liquidity_levels
+
+    def _combine_analysis(self, smc_analysis: Dict, ict_analysis: Dict, technical_analysis: Dict, symbol: str, timeframe: str) -> Dict:
+        """Combine analysis results from different strategies"""
+        # Extract key components from each analysis
+        combined = {
+            'symbol': symbol,
+            'timeframe': timeframe,
+            'datetime': smc_analysis.get('datetime', None),
+            'current_price': smc_analysis.get('current_price', None),
+            'bias': self._determine_combined_bias(smc_analysis, ict_analysis, technical_analysis),
+            'signals': [],
+            'key_levels': [],
+            'smc_analysis': smc_analysis,
+            'ict_analysis': ict_analysis,
+            'technical_analysis': technical_analysis
+        }
+        
+        # Combine signals
+        combined['signals'].extend(smc_analysis.get('signals', []))
+        combined['signals'].extend(ict_analysis.get('signals', []))
+        combined['signals'].extend(technical_analysis.get('signals', []))
+        
+        # Sort signals by strength
+        combined['signals'].sort(key=lambda x: x.get('strength', 0), reverse=True)
+        
+        return combined
+
+    def determine_bias(self, signals: List[Dict]) -> Dict:
+        """Determine market bias based on signals"""
+        bullish_signals = [s for s in signals if s.get('direction', '') == 'buy' or s.get('type', '') == 'bullish']
+        bearish_signals = [s for s in signals if s.get('direction', '') == 'sell' or s.get('type', '') == 'bearish']
+        
+        # Calculate weighted strength
+        bullish_strength = sum(s.get('strength', 50) for s in bullish_signals)
+        bearish_strength = sum(s.get('strength', 50) for s in bearish_signals)
+        
+        # Determine direction
+        if bullish_strength > bearish_strength:
+            direction = 'bullish'
+            strength = bullish_strength / (bullish_strength + bearish_strength) if (bullish_strength + bearish_strength) > 0 else 0.5
+        elif bearish_strength > bullish_strength:
+            direction = 'bearish'
+            strength = bearish_strength / (bullish_strength + bearish_strength) if (bullish_strength + bearish_strength) > 0 else 0.5
+        else:
+            direction = 'neutral'
+            strength = 0.5
+        
+        # Calculate confidence based on signal consistency
+        if len(bullish_signals) + len(bearish_signals) > 0:
+            if direction == 'bullish':
+                confidence = len(bullish_signals) / (len(bullish_signals) + len(bearish_signals))
+            elif direction == 'bearish':
+                confidence = len(bearish_signals) / (len(bullish_signals) + len(bearish_signals))
+            else:
+                confidence = 0.5
+        else:
+            confidence = 0
+        
+        return {
+            'direction': direction,
+            'strength': strength,
+            'confidence': confidence
+        }
+
+    def find_best_trade_setup(self, signals: List[Dict], df: pd.DataFrame) -> Dict:
+        """Find the best trade setup from a list of signals"""
+        if not signals:
+            return None
+        
+        # Filter for entry signals
+        entry_signals = [s for s in signals if s.get('type') == 'entry']
+        if not entry_signals:
+            return None
+        
+        # Get the strongest signal
+        strongest_signal = max(entry_signals, key=lambda x: x.get('strength', 0))
+        
+        # Create a trade setup
+        direction = strongest_signal.get('direction', '')
+        entry_price = strongest_signal.get('price', df['close'].iloc[-1])
+        
+        # Calculate stop loss and take profit
+        atr = self.technical_analyzer._calculate_atr(df, 14).iloc[-1]
+        
+        if direction == 'buy':
+            stop_loss = entry_price - (2 * atr)
+            take_profit = entry_price + (3 * atr)
+        else:  # sell
+            stop_loss = entry_price + (2 * atr)
+            take_profit = entry_price - (3 * atr)
+        
+        # Calculate risk-reward ratio
+        risk = abs(entry_price - stop_loss)
+        reward = abs(entry_price - take_profit)
+        risk_reward = reward / risk if risk > 0 else 0
+        
+        return {
+            'symbol': strongest_signal.get('symbol', ''),
+            'direction': direction,
+            'entry_price': entry_price,
+            'stop_loss': stop_loss,
+            'take_profit': take_profit,
+            'risk_reward': risk_reward,
+            'strength': strongest_signal.get('strength', 0),
+            'reason': strongest_signal.get('description', '')
+        }

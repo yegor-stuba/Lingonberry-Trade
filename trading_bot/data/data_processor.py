@@ -363,8 +363,8 @@ class DataProcessor:
             if file_path.exists():
                 try:
                     # First check if it's a standard format with headers
-                    first_line = open(file_path, 'r').readline().strip()
-                    
+                    with open(file_path, 'r') as f:
+                        first_line = f.readline().strip()                    
                     if "Historical data" in first_line:
                         # Skip the first two lines (headers)
                         df = pd.read_csv(file_path, skiprows=2, header=None, sep=' ')
@@ -585,15 +585,26 @@ class DataProcessor:
         
             # Close crypto provider connection using a new event loop
             try:
-                # Create a new event loop for cleanup
-                loop = asyncio.new_event_loop()
-                asyncio.set_event_loop(loop)
-                
-                # Run the close method in the new loop
-                loop.run_until_complete(self.crypto_provider.close())
-                
-                # Close the loop
-                loop.close()
+                # Check if there's a running event loop
+                try:
+                    loop = asyncio.get_running_loop()
+                    if loop.is_running():
+                        logger.info("Using existing event loop for cleanup")
+                        asyncio.run_coroutine_threadsafe(self.crypto_provider.close(), loop)
+                    else:
+                        # Create a new event loop for cleanup
+                        logger.info("Creating new event loop for cleanup")
+                        loop = asyncio.new_event_loop()
+                        asyncio.set_event_loop(loop)
+                        loop.run_until_complete(self.crypto_provider.close())
+                        loop.close()
+                except RuntimeError:
+                    # No running event loop
+                    logger.info("No running event loop, creating new one for cleanup")
+                    loop = asyncio.new_event_loop()
+                    asyncio.set_event_loop(loop)
+                    loop.run_until_complete(self.crypto_provider.close())
+                    loop.close()
             except Exception as e:
                 logger.error(f"Error closing crypto provider: {e}")
         

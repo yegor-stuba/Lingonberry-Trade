@@ -26,13 +26,20 @@ class SignalGenerator:
     def __init__(self):
         """Initialize the signal generator"""
         self.strategies = {}
-        self.technical_analyzer = TechnicalAnalyzer()
-        self.sentiment_analyzer = SentimentAnalyzer()
         
         # Add default strategies
+        from trading_bot.strategy.smc_strategy import SMCStrategy
+        from trading_bot.strategy.ict_strategy import ICTStrategy
+        
         self.add_strategy("smc", SMCStrategy())
         self.add_strategy("ict", ICTStrategy())
-        self.add_strategy("combined", CombinedStrategy())
+        
+        # Try to add combined strategy if available
+        try:
+            from trading_bot.strategy.combined_strategy import CombinedStrategy
+            self.add_strategy("combined", CombinedStrategy())
+        except (ImportError, TypeError) as e:
+            logger.warning(f"Could not load CombinedStrategy: {e}")
         
         logger.info(f"Initialized signal generator with {len(self.strategies)} strategies")
     
@@ -114,29 +121,51 @@ class SignalGenerator:
         
         for strategy_name, strategy in self.strategies.items():
             try:
-                analysis = strategy.analyze(df, symbol, timeframe)
-                signals = analysis.get('signals', [])
+                # Generate signals using the strategy
+                signals = strategy.generate_signals(symbol, df, timeframe)
                 
-                if signals:
-                    logger.info(f"Strategy {strategy_name} generated {len(signals)} signals")
+                # Ensure each signal has the required fields
+                for signal in signals:
+                    # Add symbol if not present
+                    if 'symbol' not in signal:
+                        signal['symbol'] = symbol
                     
-                    # Add strategy name to signals
-                    for signal in signals:
+                    # Add strategy name if not present
+                    if 'strategy' not in signal:
                         signal['strategy'] = strategy_name
                     
-                    all_signals.extend(signals)
-                else:
-                    logger.info(f"Strategy {strategy_name} generated no signals")
+                    # Ensure risk-reward is calculated
+                    if 'risk_reward' not in signal and 'entry_price' in signal and 'stop_loss' in signal and 'take_profit' in signal:
+                        if signal.get('direction') == 'BUY':
+                            risk = signal['entry_price'] - signal['stop_loss']
+                            reward = signal['take_profit'] - signal['entry_price']
+                        else:  # SELL
+                            risk = signal['stop_loss'] - signal['entry_price']
+                            reward = signal['entry_price'] - signal['take_profit']
+                        
+                        if risk > 0:
+                            signal['risk_reward'] = reward / risk
+                        else:
+                            signal['risk_reward'] = 0
                     
+                    # Ensure strength is present
+                    if 'strength' not in signal:
+                        signal['strength'] = 70  # Default strength
+                
+                # Add signals to the collection
+                all_signals.extend(signals)
+                
+                logger.info(f"Strategy {strategy_name} generated {len(signals)} signals")
             except Exception as e:
-                logger.error(f"Error in strategy {strategy_name}: {e}")
-                import traceback
-                traceback.print_exc()
+                logger.error(f"Error generating signals with {strategy_name} strategy: {e}", exc_info=True)
         
-        # Sort signals by strength
-        all_signals.sort(key=lambda x: x.get('strength', 0), reverse=True)
+        # Add timestamp to all signals
+        for signal in all_signals:
+            if 'timestamp' not in signal:
+                signal['timestamp'] = pd.Timestamp.now().strftime('%Y-%m-%d %H:%M:%S')
         
         return all_signals
+
     
     def _adjust_signals_with_sentiment(self, signals: List[Dict], sentiment_data: Dict) -> List[Dict]:
         """
@@ -187,55 +216,97 @@ class SignalGenerator:
     
     def get_trade_setup(self, signal: Dict) -> Dict:
         """
-        Get trade setup details from a signal
+        Get trade setup from a signal
         
         Args:
             signal (dict): Trading signal
             
         Returns:
-            dict: Trade setup details
+            dict: Trade setup
         """
-        strategy_name = signal.get('strategy')
+        if not signal:
+            return {}
         
-        if strategy_name and strategy_name in self.strategies:
-            # Use the specified strategy
-            strategy = self.strategies[strategy_name]
-            return strategy.get_trade_setup(signal)
-        
-        # Default implementation if strategy not found
+        # Extract basic signal info
         symbol = signal.get('symbol', '')
-        signal_type = signal.get('type', '')
-        entry = signal.get('entry', 0)
+        direction = signal.get('direction', '')
+        
+        # Get entry, stop loss, and take profit
+        entry_price = signal.get('entry_price', 0)
         stop_loss = signal.get('stop_loss', 0)
         take_profit = signal.get('take_profit', 0)
-        risk_reward = signal.get('risk_reward', 0)
+        
+        # If entry price is not provided, use the current price
+        if entry_price == 0 and 'price' in signal:
+            entry_price = signal['price']
+        
+        # If stop loss or take profit are not provided, calculate them
+        if stop_loss == 0 or take_profit == 0:
+            # Get the current price if not already set
+            current_price = entry_price if entry_price > 0 else signal.get('price', 0)
+            
+            # If we still don't have a price, we can't calculate
+            if current_price == 0:
+                return {}
+            
+            # Calculate ATR-based stop loss and take profit
+            atr_value = signal.get('atr', 0)
+            if atr_value == 0:
+                # Use a default percentage if ATR is not available
+                atr_value = current_price * 0.01  # 1% of price
+            
+            if direction == 'BUY':
+                if stop_loss == 0:
+                    stop_loss = current_price - (2 * atr_value)
+                if take_profit == 0:
+                    take_profit = current_price + (4 * atr_value)  # 2:1 risk-reward
+            else:  # SELL
+                if stop_loss == 0:
+                    stop_loss = current_price + (2 * atr_value)
+                if take_profit == 0:
+                    take_profit = current_price - (4 * atr_value)  # 2:1 risk-reward
+        
+        # Calculate risk-reward ratio
+        if direction == 'BUY':
+            risk = entry_price - stop_loss if stop_loss > 0 else 0
+            reward = take_profit - entry_price if take_profit > 0 else 0
+        else:  # SELL
+            risk = stop_loss - entry_price if stop_loss > 0 else 0
+            reward = entry_price - take_profit if take_profit > 0 else 0
+        
+        risk_reward = reward / risk if risk > 0 else 0
+        
+        # Calculate risk and reward percentages
+        risk_pct = (risk / entry_price) * 100 if entry_price > 0 else 0
+        reward_pct = (reward / entry_price) * 100 if entry_price > 0 else 0
+        
+        # Get reason or create one
         reason = signal.get('reason', '')
+        if not reason and 'description' in signal:
+            reason = signal['description']
+        if not reason:
+            reason = f"{direction} signal with {risk_reward:.2f} risk-reward ratio"
         
-        # Calculate risk percentage
-        risk_pct = abs(entry - stop_loss) / entry * 100 if entry > 0 else 0
-        
-        # Calculate potential reward percentage
-        reward_pct = abs(entry - take_profit) / entry * 100 if entry > 0 else 0
-        
-        # Determine direction
-        direction = 'LONG' if signal_type == 'buy' else 'SHORT'
+        # Get strategy name
+        strategy_name = signal.get('strategy', 'Unknown')
         
         # Create trade setup
         trade_setup = {
             'symbol': symbol,
             'direction': direction,
-            'entry_price': entry,
+            'entry_price': entry_price,
             'stop_loss': stop_loss,
             'take_profit': take_profit,
             'risk_reward': risk_reward,
             'risk_pct': risk_pct,
             'reward_pct': reward_pct,
             'reason': reason,
-            'strategy': strategy_name or 'Unknown',
+            'strategy': strategy_name,
             'timestamp': pd.Timestamp.now().strftime('%Y-%m-%d %H:%M:%S')
         }
         
         return trade_setup
+
     
     def filter_signals(self, signals: List[Dict], min_risk_reward: float = 3.0, 
                       min_strength: int = 70) -> List[Dict]:
@@ -269,15 +340,20 @@ class SignalGenerator:
             signals (list): List of signals
             
         Returns:
-            dict or None: Best signal or None if no signals
+            dict: Best signal or None if no signals
         """
         if not signals:
             return None
         
-        # Sort by strength and risk-reward ratio
-        sorted_signals = sorted(signals, key=lambda x: (x.get('strength', 0), x.get('risk_reward', 0)), reverse=True)
+        # Sort signals by a combination of risk-reward and strength
+        # This prioritizes signals with good risk-reward and high strength
+        sorted_signals = sorted(signals, key=lambda x: (
+            x.get('risk_reward', 0) * 10 + x.get('strength', 0) / 10
+        ), reverse=True)
         
-        return sorted_signals[0]
+        # Return the best signal
+        return sorted_signals[0] if sorted_signals else None
+
     
     def get_conflicting_signals(self, signals: List[Dict]) -> Dict[str, List[Dict]]:
         """
