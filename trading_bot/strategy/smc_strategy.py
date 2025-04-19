@@ -81,20 +81,25 @@ class SMCStrategy(Strategy):
         
         return analysis
 
-    def generate_signals(self, analysis: Dict) -> List[Dict]:
+    def generate_signals(self, symbol: str, df: pd.DataFrame, timeframe: str = None) -> List[Dict]:
         """
-        Generate trading signals from SMC analysis
+        Generate trading signals based on SMC analysis
         
         Args:
-            analysis (dict): SMC analysis results
+            symbol (str): Symbol being analyzed
+            df (pd.DataFrame): OHLCV data
+            timeframe (str, optional): Timeframe being analyzed
             
         Returns:
             list: Trading signals
         """
+        # Perform analysis
+        analysis = self.analyze(df, symbol, timeframe)
+        
+        # Generate signals from analysis
         signals = []
         
         # Extract key components from analysis
-        symbol = analysis.get('symbol', '')
         market_structure = analysis.get('market_structure', {})
         order_blocks = analysis.get('order_blocks', [])
         fair_value_gaps = analysis.get('fair_value_gaps', [])

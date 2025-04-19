@@ -38,9 +38,12 @@ class TelegramBot:
         self.data_processor = DataProcessor()
         self.signal_generator = SignalGenerator()
         
+        # Add a flag to track if the bot is running
+        self.is_running = False
+        
         # Default settings
-        self.default_timeframe = "H1"
-        self.default_bars = 100
+        self.default_timeframe = "M30"
+        self.default_bars = 200
         
         # Available pairs
         self.crypto_pairs = ["BTCUSDT", "ETHUSDT", "XRPUSDT", "ADAUSDT", "SOLUSDT"]
@@ -74,25 +77,34 @@ class TelegramBot:
             "XAGUSD": "OANDA:XAGUSD"
         }
         
-          # Initialize trade journal
+        # Initialize trade journal
         self.trade_journal = TradeJournal()
-        
+
         # Use provided dashboard URL or default from settings
-        # If dashboard_url is provided, it takes precedence over the environment variable
-        if dashboard_url:
-            self.dashboard_url = dashboard_url
-        else:
-            # Try to get from environment variable first, then fall back to settings
-            self.dashboard_url = os.environ.get("DASHBOARD_URL", DASHBOARD_URL)
-        
-        # Log the dashboard URL being used
+        self.dashboard_url = dashboard_url if dashboard_url else DASHBOARD_URL
+
+        # Log the dashboard URL
         logger.info(f"Telegram bot using dashboard URL: {self.dashboard_url}")
-        # Set journal URL
-        self.journal_url = f"{self.dashboard_url}/telegram_journal?ngrok-skip-browser-warning=true"
-        logger.info(f"Using journal URL: {self.journal_url}")
-        
-        # Register handlers
+
+        # Format the journal URL
+        if self.dashboard_url:
+            # Check if it's a valid external URL (not localhost)
+            if "localhost" not in self.dashboard_url and "127.0.0.1" not in self.dashboard_url:
+                self.journal_url = f"{self.dashboard_url}/telegram_journal"
+                # Add ngrok warning bypass if needed
+                if "ngrok" in self.journal_url:
+                    self.journal_url += "?ngrok-skip-browser-warning=true"
+                logger.info(f"Using journal URL: {self.journal_url}")
+            else:
+                self.journal_url = None
+                logger.warning(f"Using local URL which won't work for Telegram web apps: {self.dashboard_url}")
+        else:
+            self.journal_url = None
+            logger.warning("No dashboard URL provided, web app buttons will be disabled")
+
+                # Register handlers
         self.register_handlers()
+
         
     def register_handlers(self):
         """Register command and message handlers"""
@@ -105,7 +117,15 @@ class TelegramBot:
         self.application.add_handler(CommandHandler("timeframes", self.timeframes_command))
         self.application.add_handler(CommandHandler("chart", self.chart_command))
         self.application.add_handler(CommandHandler("journal", self.journal_command))
-        
+        self.application.job_queue.run_repeating(self.health_check, interval=900)
+
+        # Add keepalive mechanism
+        self.application.job_queue.run_repeating(self.keepalive, interval=60)
+
+        # Schedule periodic tasks
+        self.application.job_queue.run_repeating(self.update_trades_job, interval=900)  # Every 15 minutes
+        self.application.job_queue.run_repeating(self.health_check, interval=300)  # Every 5 minutes
+            
         # Callback query handler
         self.application.add_handler(CallbackQueryHandler(self.button_callback))
         
@@ -115,6 +135,7 @@ class TelegramBot:
         # Error handler
         self.application.add_error_handler(self.error_handler)
 
+
     async def start_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle the /start command"""
         await update.message.reply_text(
@@ -123,6 +144,57 @@ class TelegramBot:
             "Use /help to see available commands."
         )
     
+    async def update_trades_job(self, context: ContextTypes.DEFAULT_TYPE):
+        """Periodically update active trades with current prices"""
+        try:
+            logger.info("Running scheduled trade update job")
+            update_result = self.trade_journal.update_active_trades_with_current_prices(self.data_processor)
+            logger.info(f"Scheduled trade update completed: {update_result}")
+            
+            # Check for trades that have hit stop loss or take profit
+            closed_trades = self.trade_journal.check_trade_outcomes()
+            if closed_trades and closed_trades.get('closed', 0) > 0:
+                # Notify users about closed trades
+                for user_id in self.trade_journal.get_active_user_ids():
+                    try:
+                        user_closed_trades = [t for t in closed_trades.get('trades', []) 
+                                            if t.get('user_id') == user_id]
+                        
+                        if user_closed_trades:
+                            message = "🔔 *Trade Update*\n\n"
+                            message += f"{len(user_closed_trades)} trade(s) have been closed:\n\n"
+                            
+                            for trade in user_closed_trades:
+                                outcome = "✅ WIN" if trade.get('outcome') == 'win' else "❌ LOSS"
+                                message += (
+                                    f"*{trade.get('symbol')}* {trade.get('direction')}: {outcome}\n"
+                                    f"Profit/Loss: {trade.get('profit_loss', 0):.2f}\n"
+                                    f"Reason: {trade.get('close_reason', 'Unknown')}\n\n"
+                                )
+                            
+                            # Send notification to user
+                            await context.bot.send_message(
+                                chat_id=user_id,
+                                text=message,
+                                parse_mode='Markdown'
+                            )
+                    except Exception as e:
+                        logger.error(f"Error sending trade update to user {user_id}: {e}")
+                        
+        except Exception as e:
+            logger.error(f"Error in scheduled trade update: {e}", exc_info=True)
+
+
+
+    async def keepalive(self, context: ContextTypes.DEFAULT_TYPE):
+        """Send a keepalive ping to prevent connection timeouts"""
+        try:
+            # Simple ping to keep the connection alive
+            await self.application.bot.get_me()
+            logger.debug("Keepalive ping sent")
+        except Exception as e:
+            logger.warning(f"Keepalive ping failed: {e}")
+
 
     # Add this new method:
     async def account_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -297,6 +369,10 @@ class TelegramBot:
     async def journal_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle the /journal command"""
         try:
+            # First, update active trades with current prices
+            update_result = self.trade_journal.update_active_trades_with_current_prices(self.data_processor)
+            logger.info(f"Updated active trades: {update_result}")
+
             # Get recent trades
             closed_trades = self.trade_journal.get_closed_trades()
             active_trades = self.trade_journal.get_active_trades()
@@ -345,6 +421,20 @@ class TelegramBot:
             else:
                 message += "*No closed trades yet.*\n"
             
+            # Add active trades with current P&L
+            if active_trades:
+                message += "\n*Active Trades:*\n"
+                for trade in active_trades[:5]:  # Show top 5 active trades
+                    symbol = trade.get('symbol', 'Unknown')
+                    direction = trade.get('direction', 'Unknown')
+                    current_pnl = trade.get('current_pnl', 0.0)
+                    pnl_emoji = "📈" if current_pnl > 0 else "📉"
+                    
+                    message += (
+                        f"{pnl_emoji} {symbol} {direction} "
+                        f"({current_pnl:.2f})\n"
+                    )
+
             # Create keyboard with options
             keyboard = [
                 [
@@ -356,35 +446,11 @@ class TelegramBot:
                 ]
             ]
             
-            # Prepare journal URL for web app
-            # First, check if we have a valid dashboard URL (not localhost)
-            has_valid_url = (
-                self.dashboard_url and 
-                not "localhost" in self.dashboard_url and 
-                not "127.0.0.1" in self.dashboard_url
-            )
-            
-            if has_valid_url:
-                # Format the URL properly
-                base_url = self.dashboard_url
-                if base_url.endswith('/'):
-                    base_url = base_url[:-1]
-                
-                # Create the journal URL
-                journal_url = f"{base_url}/performance"
-                
-                # Add parameters to bypass ngrok warning if needed
-                if "ngrok" in journal_url:
-                    journal_url += "?ngrok-skip-browser-warning=true"
-                
-                logger.info(f"Using journal URL: {journal_url}")
-                
-                # Add web app button
+            # Add web app button only if we have a valid URL
+            if self.journal_url:
                 keyboard.append([
-                    InlineKeyboardButton("Open Journal 📊", web_app=WebAppInfo(url=journal_url))
+                    InlineKeyboardButton("Open Journal 📊", web_app=WebAppInfo(url=self.journal_url))
                 ])
-            else:
-                logger.warning(f"Not adding web app button because URL is invalid: {self.dashboard_url}")
             
             reply_markup = InlineKeyboardMarkup(keyboard)
             
@@ -417,11 +483,13 @@ class TelegramBot:
                 logger.error("Could not respond to user - neither callback_query nor message available")
 
 
-
-
     async def show_performance(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Show performance metrics from the journal"""
         try:
+           # First, update active trades with current prices
+            update_result = self.trade_journal.update_active_trades_with_current_prices(self.data_processor)
+            logger.info(f"Updated active trades: {update_result}")
+        
             # Get performance metrics
             metrics = self.trade_journal.calculate_performance_metrics()
             
@@ -1658,9 +1726,69 @@ class TelegramBot:
                 "Sorry, an error occurred while processing your request. Please try again later."
             )
 
+    async def health_check(self, context: ContextTypes.DEFAULT_TYPE):
+        """Periodic health check to ensure the bot is responsive"""
+        try:
+            # Check if we can get updates
+            await self.application.bot.get_me()
+            logger.debug("Telegram bot health check passed")
+        except Exception as e:
+            logger.error(f"Telegram bot health check failed: {e}")
+            # Try to restart the bot
+            try:
+                await self.application.stop()
+                await asyncio.sleep(5)
+                await self.run_async()
+                logger.info("Telegram bot restarted after failed health check")
+            except Exception as restart_error:
+                logger.error(f"Failed to restart Telegram bot: {restart_error}")
+
     async def run_async(self):
         """Run the Telegram bot asynchronously"""
-        await self.application.initialize()
-        await self.application.start()
-        await self.application.updater.start_polling()
-        logger.info("Telegram bot started successfully")
+        max_retries = 5
+        retry_count = 0
+        
+        while retry_count < max_retries:
+            try:
+                retry_count += 1
+                
+                # Start the application without using updater.start_polling directly
+                await self.application.start()
+                
+                # Use the application's update mechanism instead
+                await self.application.updater.start_polling()
+                
+                # Keep the application running
+                await self.application.updater.start_polling()
+                
+                return  # Exit the retry loop if successful
+            except Exception as e:
+                logger.error(f"Error running Telegram bot (attempt {retry_count}/{max_retries}): {e}")
+                if retry_count < max_retries:
+                    wait_time = 5 * retry_count  # Increase wait time with each retry
+                    logger.info(f"Retrying in {wait_time} seconds...")
+                    await asyncio.sleep(wait_time)
+                else:
+                    logger.error("Maximum retry attempts reached. Giving up on Telegram bot.")
+                    break
+
+    def run(self):
+        """Run the Telegram bot"""
+        if self.is_running:
+            logger.warning("Telegram bot is already running")
+            return
+            
+        try:
+            # Create a new event loop
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            
+            # Set the running flag
+            self.is_running = True
+            
+            # Start the bot
+            loop.run_until_complete(self.run_async())
+            loop.run_forever()
+        except Exception as e:
+            logger.error(f"Error running Telegram bot: {e}")
+            self.is_running = False

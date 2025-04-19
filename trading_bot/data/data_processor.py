@@ -546,7 +546,7 @@ class DataProcessor:
         
         return result
     
-    def get_latest_price(self, symbol: str) -> float:
+    def get_latest_price(self, symbol):
         """
         Get the latest price for a symbol
         
@@ -554,29 +554,86 @@ class DataProcessor:
             symbol (str): Trading symbol
             
         Returns:
-            float: Latest price
+            float: Latest price or None if not available
         """
-        # Determine market type
-        market_type = get_market_type(symbol)
-        
-        # Try to get live price if available
-        if self.use_live_data:
-            if market_type == 'crypto':
-                # Use crypto provider for crypto symbols
-                price = asyncio.run(self.crypto_provider.get_latest_price(symbol))
+        try:
+            # Try to get from cTrader first
+            if self.ctrader and self.ctrader.connected:
+                price = self.ctrader.get_latest_price(symbol)
                 if price is not None:
                     return price
-            elif self.ctrader.authenticated:
-                # TODO: Implement getting latest price from cTrader
-                pass
+            
+            # Try to get from crypto provider
+            if self.crypto_provider:
+                # Create a new event loop for this request
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                
+                try:
+                    # Run the async method in the new loop
+                    price = loop.run_until_complete(self.crypto_provider.get_latest_price(symbol))
+                    if price is not None:
+                        return price
+                finally:
+                    # Close the loop
+                    loop.close()
+            
+            # If all else fails, try to get from CSV
+            df = self._load_from_csv(symbol, 'H1')
+            if df is not None and not df.empty:
+                return df['close'].iloc[-1]
+            
+            return None
+        except Exception as e:
+            logger.error(f"Error getting latest price for {symbol}: {e}")
+            return None
+
+    def get_current_price(self, symbol):
+        """
+        Get the current price for a symbol
         
-        # Fallback to latest price from data
-        df = self.get_data(symbol, 'H1', 1)
-        if df is not None and not df.empty:
-            return df['close'].iloc[-1]
+        Args:
+            symbol (str): Trading symbol
+            
+        Returns:
+            float: Current price or None if not available
+        """
+        try:
+            # Try to get the latest price using get_latest_price method if it exists
+            if hasattr(self, 'get_latest_price'):
+                return self.get_latest_price(symbol)
+                
+            # Determine the data source based on the symbol
+            if any(forex in symbol for forex in ['USD', 'EUR', 'GBP', 'JPY', 'AUD', 'NZD', 'CAD', 'CHF']):
+                # This is likely a forex pair
+                source = 'ctrader'
+            elif any(metal in symbol for metal in ['XAU', 'XAG', 'GOLD', 'SILVER']):
+                # This is likely a metal
+                source = 'ctrader'
+            elif any(index in symbol for index in ['US30', 'US500', 'USTEC', 'UK100', 'GER40']):
+                # This is likely an index
+                source = 'ctrader'
+            else:
+                # Default to crypto for other symbols
+                source = 'crypto'
+            
+            # Get the latest price
+            if source == 'ctrader' and hasattr(self, 'ctrader'):
+                # Use cTrader for forex, metals, indices
+                return self.ctrader.get_current_price(symbol)
+            elif hasattr(self, 'crypto'):
+                # Use crypto provider for cryptocurrencies
+                return self.crypto.get_current_price(symbol)
+            else:
+                logger.warning(f"No suitable data provider found for {symbol}")
+                return None
         
-        return None
-    
+        except Exception as e:
+            logger.error(f"Error getting current price for {symbol}: {e}")
+            return None
+
+
+
     def close(self):
         """Close connections and clean up resources"""
         if self.use_live_data:

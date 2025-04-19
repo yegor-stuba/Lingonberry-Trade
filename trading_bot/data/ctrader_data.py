@@ -82,6 +82,7 @@ TIMEFRAME_PERIODS = {
 _instance = None
 
 class CTraderData:
+    _initialized = False # Class variable to track initialization
     """
     Class for handling cTrader data operations (Singleton pattern)
     """
@@ -94,7 +95,7 @@ class CTraderData:
         
     def __init__(self):
         """Initialize the cTrader data provider (only once)"""
-        if self._initialized:
+        if CTraderData._initialized:  # Use class name to access class variable
             return
             
         self.client = Client(EndPoints.PROTOBUF_DEMO_HOST, EndPoints.PROTOBUF_PORT, TcpProtocol)
@@ -114,7 +115,10 @@ class CTraderData:
         self.client.setDisconnectedCallback(self._on_disconnected)
         self.client.setMessageReceivedCallback(self._on_message_received)
         
-        self._initialized = True
+        # Add keepalive mechanism
+        self._keepalive_call = None
+        
+        CTraderData._initialized = True  # Set class variable
 
     def connect(self) -> bool:
         """
@@ -422,6 +426,10 @@ class CTraderData:
         d = client.send(app_auth_req)
         d.addCallback(self._on_app_auth_response)
         d.addErrback(self._on_error)
+        
+        # Remove the call to _start_keepalive() that's causing the error
+        # self._start_keepalive()  # <-- Comment out or remove this line
+
 
     def _on_app_auth_response(self, response):
         """Callback when application authentication is complete"""
@@ -456,11 +464,40 @@ class CTraderData:
             reactor.callLater(5, self._reconnect)
 
     def _reconnect(self):
-        """Attempt to reconnect to cTrader API"""
+        """Attempt to reconnect to cTrader API with exponential backoff"""
         self._reconnect_scheduled = False
+        
         if not self.connected:
-            logger.info("Connecting to cTrader API...")
-            self.client.startService()
+            max_retries = 5
+            retry_count = 0
+            
+            while retry_count < max_retries and not self.connected:
+                try:
+                    logger.info(f"Connecting to cTrader API (attempt {retry_count+1}/{max_retries})...")
+                    self.client.startService()
+                    # Wait a bit to see if connection succeeds
+                    time.sleep(5)
+                    
+                    if self.connected:
+                        logger.info("Successfully reconnected to cTrader API")
+                        break
+                        
+                    retry_count += 1
+                    if retry_count < max_retries:
+                        wait_time = 5 * (2 ** retry_count)  # Exponential backoff
+                        logger.info(f"Reconnection attempt failed. Retrying in {wait_time} seconds...")
+                        time.sleep(wait_time)
+                except Exception as e:
+                    logger.error(f"Error during reconnection attempt: {e}")
+                    retry_count += 1
+                    if retry_count < max_retries:
+                        wait_time = 5 * (2 ** retry_count)
+                        logger.info(f"Reconnection attempt failed. Retrying in {wait_time} seconds...")
+                        time.sleep(wait_time)
+            
+            if not self.connected and retry_count >= max_retries:
+                logger.error("Maximum reconnection attempts reached. Giving up on cTrader connection.")
+
 
     def _on_message_received(self, client, message):
         """Callback when a message is received from cTrader API"""
@@ -786,6 +823,35 @@ class CTraderData:
         # If we get here, none of the files worked
         logger.warning(f"No data file found for {symbol} {timeframe}")
         return pd.DataFrame()
+
+    def get_latest_price(self, symbol):
+        """
+        Get the latest price for a symbol
+        
+        Args:
+            symbol (str): Trading symbol
+            
+        Returns:
+            float: Latest price or None if not available
+        """
+        try:
+            # Normalize symbol name
+            normalized_symbol = symbol.split('.')[0].upper()
+            
+            # Try to get from historical data
+            df = self.get_historical_data(normalized_symbol, "M1", bars=1)
+            if df is not None and not df.empty:
+                return df['close'].iloc[-1]
+            
+            # If that fails, try to load from file
+            df = self.load_data(normalized_symbol, "M1")
+            if df is not None and not df.empty:
+                return df['close'].iloc[-1]
+            
+            return None
+        except Exception as e:
+            logger.error(f"Error getting latest price for {symbol}: {e}")
+            return None
 
 
     def update_data(self, symbol: str, timeframe: str, bars: int = 100) -> pd.DataFrame:

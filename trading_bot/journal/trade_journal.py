@@ -30,6 +30,8 @@ class TradeJournal:
         
         # Create tables if they don't exist
         self._create_tables()
+        # Migrate database if needed
+        self._migrate_database()
         
         logger.info(f"Trade journal initialized with database at {self.db_path}")
 
@@ -578,20 +580,26 @@ class TradeJournal:
             logger.error(f"Error getting performance history: {e}")
             return None
     
-    def get_pending_trades(self):
+    def get_pending_trades(self, user_id=None):
         """
         Get all pending trades from the journal
         
+        Args:
+            user_id (int, optional): Filter by user ID
+            
         Returns:
             list: List of pending trades
         """
         # This is a wrapper around check_pending_trades for compatibility
-        return self.check_pending_trades()
+        return self.check_pending_trades(user_id)
 
-    def check_pending_trades(self):
+    def check_pending_trades(self, user_id=None):
         """
         Check for pending trades in the journal
         
+        Args:
+            user_id (int, optional): Filter by user ID
+            
         Returns:
             list: List of pending trades
         """
@@ -600,10 +608,17 @@ class TradeJournal:
             conn = sqlite3.connect(self.db_path)
             cursor = conn.cursor()
             
-            # Query for pending trades
-            cursor.execute(
-                "SELECT * FROM trades WHERE status IN ('pending', 'open')"
-            )
+            # Build query
+            query = "SELECT * FROM trades WHERE status IN ('pending', 'open')"
+            params = []
+            
+            # Add user_id filter if provided
+            if user_id is not None:
+                query += " AND user_id = ?"
+                params.append(user_id)
+            
+            # Execute query
+            cursor.execute(query, params)
             
             # Fetch all results
             rows = cursor.fetchall()
@@ -634,7 +649,8 @@ class TradeJournal:
             return trades
         except Exception as e:
             logger.error(f"Error checking pending trades: {e}")
-            return []    
+            return []
+  
         
     def update_active_trades(self, data_processor):
         """
@@ -1104,107 +1120,119 @@ class TradeJournal:
             logger.error(f"Error updating account balance: {e}")
             return None
 
-    def update_trade(self, trade_id, update_data):
+    def update_trade(self, trade_id, **kwargs):
         """
-        Update an existing trade in the journal
+        Update a trade in the database
         
         Args:
-            trade_id (str): Trade ID
-            update_data (dict): Data to update
+            trade_id: ID of the trade to update
+            **kwargs: Fields to update
             
         Returns:
-            bool: Success or failure
+            bool: True if successful
         """
         try:
-            # Validate trade ID
-            if not trade_id:
-                logger.error("No trade ID provided for update")
-                return False
-            
-            # Get current trade data
-            conn = sqlite3.connect(self.db_path)
-            conn.row_factory = sqlite3.Row
+            conn = self._get_connection()
             cursor = conn.cursor()
             
-            cursor.execute("SELECT * FROM trades WHERE id = ?", (trade_id,))
-            trade = cursor.fetchone()
+            # Build the SET part of the SQL query
+            set_parts = []
+            values = []
             
-            if not trade:
-                logger.error(f"Trade not found: {trade_id}")
-                conn.close()
-                return False
+            for key, value in kwargs.items():
+                set_parts.append(f"{key} = ?")
+                values.append(value)
             
-            # Convert to dict
-            trade_data = dict(trade)
+            # Add trade_id to values
+            values.append(trade_id)
             
-            # Update with new data
-            update_data['updated_at'] = datetime.now().isoformat()
-            
-            # If status is changing to 'closed', calculate profit/loss
-            if 'status' in update_data and update_data['status'] == 'closed' and trade_data['status'] != 'closed':
-                # Ensure we have exit price
-                if 'exit_price' not in update_data and not trade_data['exit_price']:
-                    logger.error(f"Cannot close trade {trade_id} without exit price")
-                    conn.close()
-                    return False
-                
-                exit_price = update_data.get('exit_price', trade_data['exit_price'])
-                
-                # Calculate profit/loss
-                position_size = trade_data['position_size'] or 0
-                
-                if trade_data['direction'] == 'BUY':
-                    profit_loss = position_size * (exit_price - trade_data['entry_price'])
-                    # Calculate pips (adjust multiplier based on pair)
-                    if 'JPY' in trade_data['symbol']:
-                        pip_multiplier = 100
-                    elif any(metal in trade_data['symbol'] for metal in ['XAU', 'GOLD']):
-                        pip_multiplier = 10
-                    else:
-                        pip_multiplier = 10000
-                    profit_loss_pips = (exit_price - trade_data['entry_price']) * pip_multiplier
-                else:  # SELL
-                    profit_loss = position_size * (trade_data['entry_price'] - exit_price)
-                    # Calculate pips (adjust multiplier based on pair)
-                    if 'JPY' in trade_data['symbol']:
-                        pip_multiplier = 100
-                    elif any(metal in trade_data['symbol'] for metal in ['XAU', 'GOLD']):
-                        pip_multiplier = 10
-                    else:
-                        pip_multiplier = 10000
-                    profit_loss_pips = (trade_data['entry_price'] - exit_price) * pip_multiplier
-                
-                # Determine outcome
-                outcome = 'win' if profit_loss > 0 else 'loss' if profit_loss < 0 else 'breakeven'
-                
-                # Add to update data
-                update_data['profit_loss'] = profit_loss
-                update_data['profit_loss_pips'] = profit_loss_pips
-                update_data['outcome'] = outcome
-                update_data['exit_time'] = update_data.get('exit_time', datetime.now().isoformat())
-                
-                # Update account balance if user_id is available
-                if trade_data['user_id']:
-                    self.update_account_balance(trade_data['user_id'], profit_loss)
-                    
-                    # Record performance metrics
-                    self._record_daily_performance(trade_data['user_id'])
-            
-            # Prepare SQL update statement
-            set_clause = ', '.join([f"{key} = ?" for key in update_data.keys()])
-            values = list(update_data.values()) + [trade_id]
-            
-            cursor.execute(f"UPDATE trades SET {set_clause} WHERE id = ?", values)
+            # Execute the update
+            cursor.execute(
+                f"UPDATE trades SET {', '.join(set_parts)} WHERE id = ?",
+                values
+            )
             
             conn.commit()
             conn.close()
             
-            logger.info(f"Updated trade: {trade_id}")
             return True
-            
+        
         except Exception as e:
-            logger.error(f"Error updating trade: {e}")
+            logger.error(f"Error updating trade {trade_id}: {e}", exc_info=True)
             return False
+
+    def _get_connection(self):
+        """Get a database connection"""
+        return sqlite3.connect(self.db_path)
+
+
+    def update_active_trades_with_current_prices(self, data_processor):
+        """
+        Update all active trades with current market prices
+        
+        Args:
+            data_processor: DataProcessor instance to get current prices
+            
+        Returns:
+            dict: Update statistics
+        """
+        try:
+            # Get all active trades
+            active_trades = self.get_active_trades()
+            if not active_trades:
+                return {'updated': 0, 'total': 0, 'errors': 0}
+            
+            updated_count = 0
+            error_count = 0
+            
+            # Process each trade
+            for trade in active_trades:
+                trade_id = trade.get('id')
+                if not trade_id:
+                    continue
+                    
+                symbol = trade.get('symbol')
+                direction = trade.get('direction')
+                entry_price = trade.get('entry_price', 0)
+                
+                try:
+                    # Get current price for this symbol
+                    current_price = data_processor.get_current_price(symbol)
+                    
+                    if current_price:
+                        # Calculate current P&L
+                        if direction == 'BUY':
+                            current_pnl = (current_price - entry_price) * trade.get('position_size', 1)
+                        else:  # SELL
+                            current_pnl = (entry_price - current_price) * trade.get('position_size', 1)
+                        
+                        # Update the trade in the database
+                        self.update_trade(
+                            trade_id=trade_id,
+                            current_price=current_price,
+                            current_pnl=current_pnl
+                        )
+                        
+                        updated_count += 1
+                    else:
+                        logger.warning(f"Could not get current price for {symbol}")
+                        error_count += 1
+                
+                except Exception as e:
+                    logger.error(f"Error updating trade {trade_id} for {symbol}: {e}")
+                    error_count += 1
+            
+            return {
+                'updated': updated_count,
+                'total': len(active_trades),
+                'errors': error_count
+            }
+        
+        except Exception as e:
+            logger.error(f"Error updating active trades: {e}", exc_info=True)
+            return {'updated': 0, 'total': 0, 'errors': 1, 'error': str(e)}
+
+
 
     def _record_daily_performance(self, user_id):
         """
@@ -1326,6 +1354,127 @@ class TradeJournal:
         except Exception as e:
             logger.error(f"Error recording daily performance: {e}")
 
+    def check_trade_outcomes(self):
+        """
+        Check if any active trades have hit stop loss or take profit
+        
+        Returns:
+            dict: Information about closed trades
+        """
+        try:
+            # Get all active trades
+            active_trades = self.get_active_trades()
+            if not active_trades:
+                return {'closed': 0, 'trades': []}
+            
+            closed_count = 0
+            closed_trades = []
+            
+            # Check each trade
+            for trade in active_trades:
+                trade_id = trade.get('id')
+                if not trade_id:
+                    continue
+                    
+                symbol = trade.get('symbol')
+                direction = trade.get('direction')
+                entry_price = trade.get('entry_price', 0)
+                stop_loss = trade.get('stop_loss', 0)
+                take_profit = trade.get('take_profit', 0)
+                current_price = trade.get('current_price', 0)
+                
+                # Skip if we don't have current price
+                if not current_price:
+                    continue
+                    
+                # Check if stop loss or take profit has been hit
+                close_reason = None
+                outcome = None
+                profit_loss = 0
+                
+                if direction == 'BUY':
+                    # Check stop loss
+                    if current_price <= stop_loss:
+                        close_reason = 'stop_loss'
+                        outcome = 'loss'
+                        profit_loss = (stop_loss - entry_price) * trade.get('position_size', 1)
+                    
+                    # Check take profit
+                    elif current_price >= take_profit:
+                        close_reason = 'take_profit'
+                        outcome = 'win'
+                        profit_loss = (take_profit - entry_price) * trade.get('position_size', 1)
+                
+                elif direction == 'SELL':
+                    # Check stop loss
+                    if current_price >= stop_loss:
+                        close_reason = 'stop_loss'
+                        outcome = 'loss'
+                        profit_loss = (entry_price - stop_loss) * trade.get('position_size', 1)
+                    
+                    # Check take profit
+                    elif current_price <= take_profit:
+                        close_reason = 'take_profit'
+                        outcome = 'win'
+                        profit_loss = (entry_price - take_profit) * trade.get('position_size', 1)
+                
+                # If we have a close reason, update the trade
+                if close_reason:
+                    # Update the trade in the database
+                    self.update_trade(
+                        trade_id=trade_id,
+                        status='closed',
+                        outcome=outcome,
+                        close_price=current_price,
+                        close_date=datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+                        close_reason=close_reason,
+                        profit_loss=profit_loss
+                    )
+                    
+                    closed_count += 1
+                    closed_trades.append({
+                        'id': trade_id,
+                        'symbol': symbol,
+                        'direction': direction,
+                        'outcome': outcome,
+                        'profit_loss': profit_loss,
+                        'close_reason': close_reason,
+                        'user_id': trade.get('user_id')
+                    })
+            
+            return {
+                'closed': closed_count,
+                'trades': closed_trades
+            }
+        
+        except Exception as e:
+            logger.error(f"Error checking trade outcomes: {e}", exc_info=True)
+            return {'closed': 0, 'error': str(e)}
+
+    def get_active_user_ids(self):
+        """
+        Get a list of user IDs with active trades
+        
+        Returns:
+            list: List of user IDs
+        """
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            
+            cursor.execute(
+                "SELECT DISTINCT user_id FROM trades WHERE status = 'active'"
+            )
+            
+            user_ids = [row[0] for row in cursor.fetchall() if row[0] is not None]
+            conn.close()
+            
+            return user_ids
+        
+        except Exception as e:
+            logger.error(f"Error getting active user IDs: {e}", exc_info=True)
+            return []
+
 
     def _create_tables(self):
         """Create necessary database tables if they don't exist"""
@@ -1360,6 +1509,8 @@ class TradeJournal:
                 timeframe TEXT,
                 reason TEXT,
                 notes TEXT,
+                current_price REAL,
+                current_pnl REAL,
                 created_at TEXT,
                 updated_at TEXT
             )
@@ -1415,7 +1566,30 @@ class TradeJournal:
             if conn:
                 conn.close()
 
-
+    def _migrate_database(self):
+        """Add any missing columns to the database"""
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            
+            # Check if current_price column exists
+            cursor.execute("PRAGMA table_info(trades)")
+            columns = [row[1] for row in cursor.fetchall()]
+            
+            # Add current_price column if it doesn't exist
+            if 'current_price' not in columns:
+                cursor.execute("ALTER TABLE trades ADD COLUMN current_price REAL")
+                logger.info("Added current_price column to trades table")
+                
+            # Add current_pnl column if it doesn't exist
+            if 'current_pnl' not in columns:
+                cursor.execute("ALTER TABLE trades ADD COLUMN current_pnl REAL")
+                logger.info("Added current_pnl column to trades table")
+                
+            conn.commit()
+            conn.close()
+        except Exception as e:
+            logger.error(f"Error migrating database: {e}")
 
 
 

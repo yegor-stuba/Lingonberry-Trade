@@ -8,6 +8,7 @@ from typing import Dict, List, Optional, Union
 import pandas as pd
 import asyncio
 from datetime import datetime
+import traceback
 
 from trading_bot.strategy.strategy_base import Strategy
 from trading_bot.strategy.smc_strategy import SMCStrategy
@@ -106,6 +107,7 @@ class SignalGenerator:
         Returns:
             list: Trading signals
         """
+        
         logger.info(f"Generating signals for {symbol} on {timeframe} timeframe")
         
         # Validate inputs
@@ -123,7 +125,21 @@ class SignalGenerator:
         for strategy_name, strategy in self.strategies.items():
             try:
                 # Generate signals using the strategy
-                signals = strategy.generate_signals(symbol, df, timeframe)
+                try:
+                    signals = strategy.generate_signals(symbol, df, timeframe)
+                    
+                    # Normalize signal format if needed
+                    for signal in signals:
+                        # Ensure 'direction' field exists
+                        if 'type' in signal and 'direction' not in signal:
+                            if signal['type'] in ['buy', 'BUY']:
+                                signal['direction'] = 'bullish'
+                            elif signal['type'] in ['sell', 'SELL']:
+                                signal['direction'] = 'bearish'
+                except Exception as e:
+                    logger.error(f"Error generating signals with {strategy_name} strategy: {e}")
+                    logger.error(traceback.format_exc())
+                    signals = []
                 
                 # Ensure each signal has the required fields
                 for signal in signals:
@@ -159,14 +175,12 @@ class SignalGenerator:
                 logger.info(f"Strategy {strategy_name} generated {len(signals)} signals")
             except Exception as e:
                 logger.error(f"Error generating signals with {strategy_name} strategy: {e}", exc_info=True)
-        
-        # Add timestamp to all signals
+                # Add timestamp to all signals
         for signal in all_signals:
             if 'timestamp' not in signal:
                 signal['timestamp'] = pd.Timestamp.now().strftime('%Y-%m-%d %H:%M:%S')
         
         return all_signals
-
     
     def _adjust_signals_with_sentiment(self, signals: List[Dict], sentiment_data: Dict) -> List[Dict]:
         """

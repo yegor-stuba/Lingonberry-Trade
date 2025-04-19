@@ -142,6 +142,7 @@ if __name__ == '__main__':
     start_dashboard(debug=True)
 # Add authentication status endpoint to the web dashboard
 @app.route('/api/status')
+
 def get_status():
     """API endpoint to get system status"""
     # Check cTrader connection
@@ -192,13 +193,26 @@ def telegram_journal():
     # Get performance history for charts
     history = trade_journal.get_performance_history(user_id=user_id, days=30)
     
+    # Update active trades with current prices
+    if trades:
+        trade_journal.update_active_trades_with_current_prices(data_processor)
+    
+    # Get updated trades
+    active_trades = trade_journal.get_active_trades(user_id=user_id)
+    pending_trades = trade_journal.get_pending_trades(user_id=user_id)
+    closed_trades = trade_journal.get_closed_trades(user_id=user_id)
+    
     return render_template(
         'telegram_mini_app.html',
-        trades=trades,
+        active_trades=active_trades,
+        pending_trades=pending_trades,
+        closed_trades=closed_trades,
         metrics=metrics,
         history=history,
         user_id=user_id
     )
+
+
 @app.route('/api/journal_summary')
 def get_journal_summary():
     """API endpoint to get a summary of the journal for Telegram"""

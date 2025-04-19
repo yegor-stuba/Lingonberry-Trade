@@ -176,6 +176,11 @@ th {
 tr:hover {
     background-color: rgba(0, 0, 0, 0.02);
 }
+.trade-journal-table{
+    width: 100%;
+    overflow-x: auto;
+
+}
 
 /* Forms */
 .form-group {

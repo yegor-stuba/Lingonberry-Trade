@@ -1,539 +1,1177 @@
 """
 ICT (Inner Circle Trader) strategy implementation
-Uses ICT concepts like market structure, liquidity, and order blocks
+Implements trading strategies based on ICT concepts
 """
 
 import logging
-from typing import Dict, List, Optional, Union
 import pandas as pd
 import numpy as np
+from typing import Dict, List, Tuple, Optional, Union
 
 from trading_bot.strategy.strategy_base import Strategy
-from trading_bot.analysis.smc_analyzer import SMCAnalyzer
+from trading_bot.analysis.ict_analyzer import ICTAnalyzer
 
 logger = logging.getLogger(__name__)
 
 class ICTStrategy(Strategy):
     """
-    ICT (Inner Circle Trader) trading strategy
-    Implements trading logic based on ICT principles
+    Strategy based on ICT (Inner Circle Trader) concepts
     """
     
     def __init__(self):
         """Initialize the ICT strategy"""
-        super().__init__("Inner Circle Trader")
-        self.analyzer = SMCAnalyzer()  # Reuse the SMC analyzer which has ICT methods
-        self.min_risk_reward = 2.0
-        self.last_analysis = None
+        super().__init__("ICT")
+        self.analyzer = ICTAnalyzer()
         
-    def analyze(self, df: pd.DataFrame, symbol: str, timeframe: str) -> Dict:
+        # Define ICT setups with their weights
+        self.setups = {
+            'bos_retest': 0.8,           # Break of Structure with retest
+            'ote_with_ob': 0.9,          # OTE zone with Order Block
+            'fvg_with_liquidity': 0.85,  # Fair Value Gap with liquidity level
+            'breaker_block': 0.95,       # Breaker Block setup
+            'inducement_to_liquidity': 0.9,  # Inducement to liquidity
+            'choch_flip': 0.85,          # Change of Character with market flip
+            'kill_zone_entry': 0.8       # Entry during session kill zone
+        }
+        
+        # Define session preferences
+        self.session_preferences = {
+            'london': 0.9,    # London session
+            'new_york': 0.85, # New York session
+            'asian': 0.7      # Asian session
+        }
+    
+    def analyze(self, df: pd.DataFrame, symbol: str = None, timeframe: str = None) -> Dict:
         """
-        Analyze market data using ICT principles
+        Analyze price data using ICT concepts
         
         Args:
             df (pd.DataFrame): OHLCV data
-            symbol (str): Trading symbol
-            timeframe (str): Timeframe
+            symbol (str, optional): Symbol being analyzed
+            timeframe (str, optional): Timeframe being analyzed
             
         Returns:
             dict: Analysis results
         """
-        logger.info(f"Analyzing {symbol} on {timeframe} timeframe using ICT strategy")
+        # Perform ICT analysis
+        analysis = self.analyzer.analyze(df, symbol)
         
-        # Use the SMC analyzer to analyze the chart
-        smc_analysis = self.analyzer.analyze_chart(df, symbol)
-        
-        # Add ICT-specific analysis
-        ict_concepts = self.analyzer.identify_ict_concepts(df)
-        
-        # Combine SMC and ICT analysis
-        analysis = {**smc_analysis, 'ict_concepts': ict_concepts}
-        
-        # Add timeframe information
+        # Add strategy-specific information
+        analysis['strategy'] = 'ICT'
         analysis['timeframe'] = timeframe
         
-        # Store the last price for signal generation
-        if not df.empty:
-            analysis['current_price'] = df['close'].iloc[-1]
-            # Store the original dataframe for reference
-            self.last_analysis = analysis
+        # Find potential setups
+        setups = self._find_setups(analysis, df)
+        analysis['setups'] = setups
         
-        # Generate signals based on the analysis
-        signals = self.generate_signals(analysis)
-        analysis['signals'] = signals
-        
-        logger.info(f"ICT analysis for {symbol} on {timeframe} complete. Found {len(signals)} signals.")
+        # Determine overall bias
+        bias = self._determine_bias(analysis)
+        analysis['bias'] = bias
         
         return analysis
     
-    def generate_signals(self, analysis: Dict) -> List[Dict]:
+    def generate_signals(self, symbol: str, df: pd.DataFrame, timeframe: str = None) -> List[Dict]:
         """
-        Generate trading signals from ICT analysis
+        Generate trading signals based on ICT analysis
         
         Args:
-            analysis (dict): ICT analysis results
+            symbol (str): Symbol being analyzed
+            df (pd.DataFrame): OHLCV data
+            timeframe (str, optional): Timeframe being analyzed
             
         Returns:
             list: Trading signals
         """
+        # Perform analysis
+        analysis = self.analyze(df, symbol, timeframe)
+        
+        # Generate signals from setups
         signals = []
         
-        # Extract key components from analysis
-        symbol = analysis.get('symbol', '')
-        ict_concepts = analysis.get('ict_concepts', {})
-        market_structure = analysis.get('market_structure', {})
-        order_blocks = analysis.get('order_blocks', [])
-        fair_value_gaps = analysis.get('fair_value_gaps', [])
-        liquidity_levels = analysis.get('liquidity_levels', [])
-        order_flow = analysis.get('order_flow', {})
-        bias = analysis.get('bias', 'neutral')
+        for setup in analysis['setups']:
+            # Convert setup to signal
+            signal = self._setup_to_signal(setup, df, symbol, timeframe)
+            if signal:
+                signals.append(signal)
         
-        # Current price (close of the last candle)
-        current_price = analysis.get('current_price')
-        if current_price is None:
-            logger.warning(f"No price data found for {symbol}")
-            return signals
-        
-        # Signal 1: OTE (Optimal Trade Entry) Zones
-        signals.extend(self._generate_ote_signals(
-            symbol, ict_concepts.get('ote_zones', []), bias, current_price
-        ))
-        
-        # Signal 2: Breaker Blocks
-        signals.extend(self._generate_breaker_signals(
-            symbol, ict_concepts.get('breaker_blocks', []), bias, current_price
-        ))
-        
-        # Signal 3: Kill Zone Setups (London/NY session)
-        signals.extend(self._generate_kill_zone_signals(
-            symbol, ict_concepts.get('kill_zones', {}), bias, current_price
-        ))
-        
-        # Signal 4: Fair Value Gap + Order Block
-        signals.extend(self._generate_fvg_ob_signals(
-            symbol, fair_value_gaps, order_blocks, bias, current_price
-        ))
-        
-        # Filter signals by risk-reward ratio
-        valid_signals = [s for s in signals if s.get('risk_reward', 0) >= self.min_risk_reward]
-        
-        # Sort by strength (descending)
-        valid_signals.sort(key=lambda x: x.get('strength', 0), reverse=True)
-        
-        return valid_signals
-    
-    def _generate_ote_signals(self, symbol: str, ote_zones: List[Dict], 
-                             bias: str, current_price: float) -> List[Dict]:
-        """Generate signals based on Optimal Trade Entry zones"""
-        signals = []
-        
-        # Filter for recent OTE zones (less than 20 candles old)
-        recent_otes = [ote for ote in ote_zones if ote.get('age', 100) < 20]
-        
-        for ote in recent_otes:
-            ote_type = ote.get('type', '')
-            ote_top = ote.get('top', 0)
-            ote_bottom = ote.get('bottom', 0)
-            ote_strength = ote.get('strength', 50)
-            
-            # Check if price is near the OTE zone
-            if ote_type == 'bullish' and current_price <= ote_top * 1.01 and current_price >= ote_bottom * 0.99:
-                # Bullish signal
-                stop_loss = ote_bottom * 0.995  # Just below the OTE zone
-                
-                # Calculate take profit - handle the case where df might be None
-                try:
-                    take_profit, risk_reward = self.analyzer.find_optimal_take_profit(
-                        None,  # We don't have the df here, but the method can handle it
-                        current_price,
-                        stop_loss,
-                        'buy',
-                        min_rr=2.0
-                    )
-                except (TypeError, AttributeError) as e:
-                    # If the method fails, calculate a simple 1:2 risk-reward ratio
-                    logger.warning(f"Error finding optimal take profit: {e}. Using simple calculation.")
-                    risk = current_price - stop_loss
-                    take_profit = current_price + (risk * 2)
-                    risk_reward = 2.0
-                
-                signals.append({
-                    'symbol': symbol,
-                    'type': 'buy',
-                    'entry': current_price,
-                    'stop_loss': stop_loss,
-                    'take_profit': take_profit,
-                    'risk_reward': risk_reward,
-                    'strength': ote_strength,
-                    'reason': f"ICT Bullish OTE Zone: {ote_bottom:.5f}-{ote_top:.5f}"
-                })
-            
-            elif ote_type == 'bearish' and current_price >= ote_bottom * 0.99 and current_price <= ote_top * 1.01:
-                # Bearish signal
-                stop_loss = ote_top * 1.005  # Just above the OTE zone
-                
-                # Calculate take profit - handle the case where df might be None
-                try:
-                    take_profit, risk_reward = self.analyzer.find_optimal_take_profit(
-                        None,  # We don't have the df here, but the method can handle it
-                        current_price,
-                        stop_loss,
-                        'sell',
-                        min_rr=2.0
-                    )
-                except (TypeError, AttributeError):
-                    # If the method fails, calculate a simple 1:2 risk-reward ratio
-                    risk = stop_loss - current_price
-                    take_profit = current_price - (risk * 2)
-                    risk_reward = 2.0
-                
-                signals.append({
-                    'symbol': symbol,
-                    'type': 'sell',
-                    'entry': current_price,
-                    'stop_loss': stop_loss,
-                    'take_profit': take_profit,
-                    'risk_reward': risk_reward,
-                    'strength': ote_strength,
-                    'reason': f"ICT Bearish OTE Zone: {ote_bottom:.5f}-{ote_top:.5f}"
-                })
+        # Sort signals by strength (descending)
+        signals.sort(key=lambda x: x.get('strength', 0), reverse=True)
         
         return signals
-    
-    def _generate_breaker_signals(self, symbol: str, breaker_blocks: List[Dict],
-                                bias: str, current_price: float) -> List[Dict]:
-        """
-        Generate signals based on Breaker Blocks
-        
-        Args:
-            symbol (str): Trading symbol
-            breaker_blocks (list): Breaker blocks
-            bias (str): Market bias
-            current_price (float): Current price
-            
-        Returns:
-            list: Trading signals
-        """
-        signals = []
-        
-        # Filter for recent breaker blocks (less than 20 candles old)
-        recent_blocks = [block for block in breaker_blocks if block.get('age', 100) < 20]
-        
-        for block in recent_blocks:
-            block_type = block.get('type', '')
-            block_top = block.get('top', 0)
-            block_bottom = block.get('bottom', 0)
-            
-            # Check if price is near the block
-            price_near_block = (
-                (block_type == 'bullish' and current_price < block_top * 1.02) or
-                (block_type == 'bearish' and current_price > block_bottom * 0.98)
-            )
-            
-            if price_near_block:
-                # Generate signal based on block type
-                if block_type == 'bullish' and (bias == 'bullish' or bias == 'neutral'):
-                    # Bullish signal
-                    stop_loss = block_bottom * 0.995  # Just below the block
-                    
-                    # Take profit at a 1:3 risk-reward ratio
-                    risk = current_price - stop_loss
-                    take_profit = current_price + (risk * 3)
-                    
-                    signals.append({
-                        'symbol': symbol,
-                        'type': 'buy',
-                        'entry': current_price,
-                        'stop_loss': stop_loss,
-                        'take_profit': take_profit,
-                        'risk_reward': 3.0,
-                        'strength': block.get('strength', 65),
-                        'reason': f"ICT Bullish Breaker Block at {block_bottom:.5f}-{block_top:.5f}"
-                    })
-                
-                elif block_type == 'bearish' and (bias == 'bearish' or bias == 'neutral'):
-                    # Bearish signal
-                    stop_loss = block_top * 1.005  # Just above the block
-                    
-                    # Take profit at a 1:3 risk-reward ratio
-                    risk = stop_loss - current_price
-                    take_profit = current_price - (risk * 3)
-                    
-                    signals.append({
-                        'symbol': symbol,
-                        'type': 'sell',
-                        'entry': current_price,
-                        'stop_loss': stop_loss,
-                        'take_profit': take_profit,
-                        'risk_reward': 3.0,
-                        'strength': block.get('strength', 65),
-                        'reason': f"ICT Bearish Breaker Block at {block_bottom:.5f}-{block_top:.5f}"
-                    })
-        
-        return signals
-    
-    def _generate_kill_zone_signals(self, symbol: str, kill_zones: Dict,
-                                  bias: str, current_price: float) -> List[Dict]:
-        """
-        Generate signals based on Kill Zones (London/NY sessions)
-        
-        Args:
-            symbol (str): Trading symbol
-            kill_zones (dict): Kill zones analysis
-            bias (str): Market bias
-            current_price (float): Current price
-            
-        Returns:
-            list: Trading signals
-        """
-        signals = []
-        
-        # Check London session
-        london = kill_zones.get('london', {})
-        london_bias = london.get('bias', 'neutral')
-        london_strength = london.get('strength', 0)
-        
-        # Check New York session
-        new_york = kill_zones.get('new_york', {})
-        ny_bias = new_york.get('bias', 'neutral')
-        ny_strength = new_york.get('strength', 0)
-        
-        # Generate signals if session bias is strong and aligns with overall bias
-        if london_bias == 'bullish' and london_strength > 70 and (bias == 'bullish' or bias == 'neutral'):
-            # Bullish London session signal
-            # Calculate stop loss based on average range
-            avg_range = london.get('avg_range', 0.5)
-            stop_loss = current_price * (1 - avg_range / 100)
-            
-            # Take profit at a 1:2 risk-reward ratio
-            risk = current_price - stop_loss
-            take_profit = current_price + (risk * 2)
-            
-            signals.append({
-                'symbol': symbol,
-                'type': 'buy',
-                'entry': current_price,
-                'stop_loss': stop_loss,
-                'take_profit': take_profit,
-                'risk_reward': 2.0,
-                'strength': london_strength,
-                'reason': f"ICT London Kill Zone: Strong bullish bias ({london_strength}%)"
-            })
-        
-        elif london_bias == 'bearish' and london_strength > 70 and (bias == 'bearish' or bias == 'neutral'):
-            # Bearish London session signal
-            # Calculate stop loss based on average range
-            avg_range = london.get('avg_range', 0.5)
-            stop_loss = current_price * (1 + avg_range / 100)
-            
-            # Take profit at a 1:2 risk-reward ratio
-            risk = stop_loss - current_price
-            take_profit = current_price - (risk * 2)
-            
-            signals.append({
-                'symbol': symbol,
-                'type': 'sell',
-                'entry': current_price,
-                'stop_loss': stop_loss,
-                'take_profit': take_profit,
-                'risk_reward': 2.0,
-                'strength': london_strength,
-                'reason': f"ICT London Kill Zone: Strong bearish bias ({london_strength}%)"
-            })
-        
-        # Similar logic for New York session
-        if ny_bias == 'bullish' and ny_strength > 70 and (bias == 'bullish' or bias == 'neutral'):
-            # Bullish New York session signal
-            # Calculate stop loss based on average range
-            avg_range = new_york.get('avg_range', 0.5)
-            stop_loss = current_price * (1 - avg_range / 100)
-            
-            # Take profit at a 1:2 risk-reward ratio
-            risk = current_price - stop_loss
-            take_profit = current_price + (risk * 2)
-            
-            signals.append({
-                'symbol': symbol,
-                'type': 'buy',
-                'entry': current_price,
-                'stop_loss': stop_loss,
-                'take_profit': take_profit,
-                'risk_reward': 2.0,
-                'strength': ny_strength,
-                'reason': f"ICT New York Kill Zone: Strong bullish bias ({ny_strength}%)"
-            })
-        
-        elif ny_bias == 'bearish' and ny_strength > 70 and (bias == 'bearish' or bias == 'neutral'):
-            # Bearish New York session signal
-            # Calculate stop loss based on average range
-            avg_range = new_york.get('avg_range', 0.5)
-            stop_loss = current_price * (1 + avg_range / 100)
-            
-            # Take profit at a 1:2 risk-reward ratio
-            risk = stop_loss - current_price
-            take_profit = current_price - (risk * 2)
-            
-            signals.append({
-                'symbol': symbol,
-                'type': 'sell',
-                'entry': current_price,
-                'stop_loss': stop_loss,
-                'take_profit': take_profit,
-                'risk_reward': 2.0,
-                'strength': ny_strength,
-                'reason': f"ICT New York Kill Zone: Strong bearish bias ({ny_strength}%)"
-            })
-        
-        return signals
-    
-    def _generate_fvg_ob_signals(self, symbol: str, fair_value_gaps: List[Dict], 
-                               order_blocks: List[Dict], bias: str, 
-                               current_price: float) -> List[Dict]:
-        """
-        Generate signals based on Fair Value Gaps and Order Blocks
-        
-        Args:
-            symbol (str): Trading symbol
-            fair_value_gaps (list): Fair value gaps
-            order_blocks (list): Order blocks
-            bias (str): Market bias
-            current_price (float): Current price
-            
-        Returns:
-            list: Trading signals
-        """
-        signals = []
-        
-        # Filter for recent fair value gaps (less than 30 candles old)
-        recent_fvgs = [fvg for fvg in fair_value_gaps if fvg.get('age', 100) < 30]
-        
-        # Filter for recent order blocks (less than 20 candles old)
-        recent_obs = [ob for ob in order_blocks if ob.get('age', 100) < 20]
-        
-        # Look for alignments between FVGs and OBs
-        for fvg in recent_fvgs:
-            fvg_type = fvg.get('type', '')
-            fvg_top = fvg.get('top', 0)
-            fvg_bottom = fvg.get('bottom', 0)
-            
-            # Find matching order blocks
-            matching_obs = []
-            for ob in recent_obs:
-                ob_type = ob.get('type', '')
-                ob_top = ob.get('top', 0)
-                ob_bottom = ob.get('bottom', 0)
-                
-                # Check if the OB and FVG are aligned (same direction and close to each other)
-                if ob_type == fvg_type:
-                    # For bullish setups, OB should be below FVG
-                    if ob_type == 'bullish' and ob_top <= fvg_bottom * 1.01:
-                        matching_obs.append(ob)
-                    # For bearish setups, OB should be above FVG
-                    elif ob_type == 'bearish' and ob_bottom >= fvg_top * 0.99:
-                        matching_obs.append(ob)
-            
-            # If we have matching OBs, generate signals
-            for ob in matching_obs:
-                ob_top = ob.get('top', 0)
-                ob_bottom = ob.get('bottom', 0)
-                
-                # Calculate combined strength
-                combined_strength = (fvg.get('strength', 50) + ob.get('strength', 50)) / 2
-                
-                if fvg_type == 'bullish' and (bias == 'bullish' or bias == 'neutral'):
-                    # Bullish signal
-                    # Entry at current price if it's near the FVG
-                    if current_price <= fvg_top * 1.01:
-                        stop_loss = ob_bottom * 0.995  # Just below the order block
-                        
-                        # Calculate take profit using the analyzer's method
-                        take_profit, risk_reward = self.analyzer.find_optimal_take_profit(
-                            None,  # We don't have the df here, but the method can handle it
-                            current_price,
-                            stop_loss,
-                            'buy',
-                            min_rr=2.5
-                        )
-                        
-                        signals.append({
-                            'symbol': symbol,
-                            'type': 'buy',
-                            'entry': current_price,
-                            'stop_loss': stop_loss,
-                            'take_profit': take_profit,
-                            'risk_reward': risk_reward,
-                            'strength': combined_strength,
-                            'reason': f"ICT Bullish FVG+OB Setup: FVG({fvg_bottom:.5f}-{fvg_top:.5f}), OB({ob_bottom:.5f}-{ob_top:.5f})"
-                        })
-                
-                elif fvg_type == 'bearish' and (bias == 'bearish' or bias == 'neutral'):
-                    # Bearish signal
-                    # Entry at current price if it's near the FVG
-                    if current_price >= fvg_bottom * 0.99:
-                        stop_loss = ob_top * 1.005  # Just above the order block
-                        
-                        # Calculate take profit using the analyzer's method
-                        take_profit, risk_reward = self.analyzer.find_optimal_take_profit(
-                            None,  # We don't have the df here, but the method can handle it
-                            current_price,
-                            stop_loss,
-                            'sell',
-                            min_rr=2.5
-                        )
-                        
-                        signals.append({
-                            'symbol': symbol,
-                            'type': 'sell',
-                            'entry': current_price,
-                            'stop_loss': stop_loss,
-                            'take_profit': take_profit,
-                            'risk_reward': risk_reward,
-                            'strength': combined_strength,
-                            'reason': f"ICT Bearish FVG+OB Setup: FVG({fvg_bottom:.5f}-{fvg_top:.5f}), OB({ob_bottom:.5f}-{ob_top:.5f})"
-                        })
-        
-        return signals
+
     
     def get_trade_setup(self, signal: Dict) -> Dict:
         """
-        Get trade setup details from a signal
+        Convert a signal to a trade setup
         
         Args:
             signal (dict): Trading signal
             
         Returns:
-            dict: Trade setup details
+            dict: Trade setup
         """
-        symbol = signal.get('symbol', '')
-        signal_type = signal.get('type', '')
-        entry = signal.get('entry', 0)
-        stop_loss = signal.get('stop_loss', 0)
-        take_profit = signal.get('take_profit', 0)
+        # Extract signal properties
+        symbol = signal.get('symbol')
+        direction = signal.get('direction')
+        entry_price = signal.get('entry_price')
+        stop_loss = signal.get('stop_loss')
+        take_profit = signal.get('take_profit')
         risk_reward = signal.get('risk_reward', 0)
+        strength = signal.get('strength', 0)
         reason = signal.get('reason', '')
+        setup_type = signal.get('setup', '')
         
-        # Calculate risk percentage
-        risk_pct = abs(entry - stop_loss) / entry * 100 if entry > 0 else 0
-        
-        # Calculate potential reward percentage
-        reward_pct = abs(entry - take_profit) / entry * 100 if entry > 0 else 0
-        
-        # Determine direction
-        direction = 'LONG' if signal_type == 'buy' else 'SHORT'
+        # Skip invalid signals
+        if not entry_price or not stop_loss or not take_profit:
+            return None
         
         # Create trade setup
         trade_setup = {
             'symbol': symbol,
             'direction': direction,
-            'entry_price': entry,
+            'entry_price': entry_price,
             'stop_loss': stop_loss,
             'take_profit': take_profit,
             'risk_reward': risk_reward,
-            'risk_pct': risk_pct,
-            'reward_pct': reward_pct,
-            'reason': reason,
+            'strength': strength,
             'strategy': 'ICT',
-            'timestamp': pd.Timestamp.now().strftime('%Y-%m-%d %H:%M:%S')
+            'setup_type': setup_type,
+            'reason': reason
         }
         
+        # Calculate potential profit and loss in pips/points
+        if direction == 'bullish' or direction == 'BUY':
+            risk_points = entry_price - stop_loss
+            reward_points = take_profit - entry_price
+        else:
+            risk_points = stop_loss - entry_price
+            reward_points = entry_price - take_profit
+        
+        trade_setup['risk_points'] = abs(risk_points)
+        trade_setup['reward_points'] = abs(reward_points)
+        
+        # Add HTF context if available
+        if 'htf_bias' in signal:
+            trade_setup['htf_bias'] = signal.get('htf_bias')
+            trade_setup['aligned_with_htf'] = signal.get('aligned_with_htf', False)
+        
         return trade_setup
+
+
+    def _find_setups(self, analysis: Dict, df: pd.DataFrame) -> List[Dict]:
+        """
+        Find potential ICT setups from analysis
+        
+        Args:
+            analysis (dict): ICT analysis results
+            df (pd.DataFrame): OHLCV data
+            
+        Returns:
+            list: Potential setups
+        """
+        setups = []
+        
+        # Extract components from analysis
+        market_structure = analysis.get('market_structure', {})
+        daily_bias = analysis.get('daily_bias', {})
+        inducement_zones = analysis.get('inducement_zones', [])
+        bos_zones = analysis.get('bos_zones', [])
+        choch_zones = analysis.get('choch_zones', [])
+        ote_zones = analysis.get('ote_zones', [])
+        liquidity_levels = analysis.get('liquidity_levels', [])
+        fair_value_gaps = analysis.get('fair_value_gaps', [])
+        order_blocks = analysis.get('order_blocks', [])
+        breaker_blocks = analysis.get('breaker_blocks', [])
+        kill_zones = analysis.get('kill_zones', {})
+        
+        # 1. BOS Retest Setup
+        bos_retest_setups = self._find_bos_retest_setups(df, bos_zones, market_structure)
+        setups.extend(bos_retest_setups)
+        
+        # 2. OTE with Order Block Setup
+        ote_ob_setups = self._find_ote_with_ob_setups(df, ote_zones, order_blocks, daily_bias)
+        setups.extend(ote_ob_setups)
+        
+        # 3. FVG with Liquidity Setup
+        fvg_liquidity_setups = self._find_fvg_with_liquidity_setups(df, fair_value_gaps, liquidity_levels)
+        setups.extend(fvg_liquidity_setups)
+        
+        # 4. Breaker Block Setup
+        breaker_setups = self._find_breaker_block_setups(df, breaker_blocks, daily_bias)
+        setups.extend(breaker_setups)
+        
+        # 5. Inducement to Liquidity Setup
+        inducement_setups = self._find_inducement_to_liquidity_setups(df, inducement_zones, liquidity_levels)
+        setups.extend(inducement_setups)
+        
+        # 6. CHOCH Flip Setup
+        choch_setups = self._find_choch_flip_setups(df, choch_zones, market_structure)
+        setups.extend(choch_setups)
+        
+        # 7. Kill Zone Entry Setup
+        kill_zone_setups = self._find_kill_zone_setups(df, kill_zones, daily_bias)
+        setups.extend(kill_zone_setups)
+        
+        # Sort setups by strength (descending)
+        setups.sort(key=lambda x: x.get('strength', 0), reverse=True)
+        
+        return setups
+    
+    def _determine_bias(self, analysis: Dict) -> Dict:
+        """
+        Determine overall market bias from analysis
+        
+        Args:
+            analysis (dict): ICT analysis results
+            
+        Returns:
+            dict: Market bias information
+        """
+        # Extract components from analysis
+        market_structure = analysis.get('market_structure', {})
+        daily_bias = analysis.get('daily_bias', {})
+        
+        # Start with the daily bias
+        bias_direction = daily_bias.get('direction', 'neutral')
+        bias_strength = daily_bias.get('confidence', 50)
+        
+        # Adjust based on market structure
+        structure_trend = market_structure.get('trend', 'neutral')
+        
+        # If market structure trend agrees with daily bias, increase strength
+        if structure_trend == bias_direction:
+            bias_strength = min(100, bias_strength + 10)
+        # If market structure trend disagrees with daily bias, decrease strength
+        elif structure_trend != 'neutral' and bias_direction != 'neutral':
+            bias_strength = max(0, bias_strength - 10)
+            
+            # If bias strength is very low, switch to market structure trend
+            if bias_strength < 30:
+                bias_direction = structure_trend
+                bias_strength = 40
+        
+        return {
+            'direction': bias_direction,
+            'strength': bias_strength,
+            'zone': daily_bias.get('zone', 'neutral'),
+            'price': daily_bias.get('price', None)
+        }
+    
+    def _find_bos_retest_setups(self, df: pd.DataFrame, bos_zones: List[Dict], market_structure: Dict) -> List[Dict]:
+        """
+        Find Break of Structure with Retest setups
+        
+        Args:
+            df (pd.DataFrame): OHLCV data
+            bos_zones (list): Break of structure zones
+            market_structure (dict): Market structure analysis
+            
+        Returns:
+            list: BOS Retest setups
+        """
+        setups = []
+        
+        # Need at least one BOS zone
+        if not bos_zones:
+            return setups
+        
+        # Get trend from market structure
+        trend = market_structure.get('trend', 'neutral')
+        
+        for bos in bos_zones:
+            bos_idx = bos.get('index')
+            bos_type = bos.get('type')
+            bos_price = bos.get('price')
+            
+            # Skip if BOS is too old (more than 50 bars ago)
+            if len(df) - bos_idx > 50:
+                continue
+            
+            # Skip if BOS doesn't align with trend
+            if (trend == 'bullish' and bos_type != 'bullish') or (trend == 'bearish' and bos_type != 'bearish'):
+                continue
+            
+            # Look for a retest of the BOS level
+            retest_found = False
+            retest_idx = None
+            
+            for i in range(bos_idx + 1, len(df)):
+                if bos_type == 'bullish':
+                    # For bullish BOS, look for a pullback to the breakout level
+                    if df['low'].iloc[i] <= bos_price <= df['high'].iloc[i]:
+                        retest_found = True
+                        retest_idx = i
+                        break
+                else:
+                    # For bearish BOS, look for a pullback to the breakout level
+                    if df['low'].iloc[i] <= bos_price <= df['high'].iloc[i]:
+                        retest_found = True
+                        retest_idx = i
+                        break
+            
+            if retest_found and retest_idx is not None:
+                # Calculate setup strength
+                base_strength = bos.get('strength', 50)
+                
+                # Adjust strength based on factors
+                # 1. Recency of retest
+                recency_factor = 1.0 - (len(df) - retest_idx) / len(df)
+                adjusted_strength = base_strength * (0.7 + 0.3 * recency_factor)
+                
+                # 2. Alignment with trend
+                if (bos_type == 'bullish' and trend == 'bullish') or (bos_type == 'bearish' and trend == 'bearish'):
+                    adjusted_strength *= 1.2
+                
+                # 3. Apply setup weight
+                final_strength = adjusted_strength * self.setups['bos_retest']
+                
+                # Create setup
+                setup = {
+                    'type': 'bos_retest',
+                    'direction': bos_type,
+                    'bos_index': bos_idx,
+                    'retest_index': retest_idx,
+                    'entry_price': bos_price,
+                    'strength': min(100, int(final_strength)),
+                    'description': f"{bos_type.capitalize()} Break of Structure with Retest"
+                }
+                
+                # Calculate stop loss and take profit
+                if bos_type == 'bullish':
+                    # For bullish setups, find recent low for stop loss
+                    stop_loss = df['low'].iloc[max(0, retest_idx-5):retest_idx+1].min()
+                    # Take profit based on recent swing high
+                    take_profit = bos_price + (bos_price - stop_loss) * 2
+                else:
+                    # For bearish setups, find recent high for stop loss
+                    stop_loss = df['high'].iloc[max(0, retest_idx-5):retest_idx+1].max()
+                    # Take profit based on recent swing low
+                    take_profit = bos_price - (stop_loss - bos_price) * 2
+                
+                setup['stop_loss'] = stop_loss
+                setup['take_profit'] = take_profit
+                
+                # Calculate risk-reward ratio
+                if bos_type == 'bullish':
+                    risk = bos_price - stop_loss
+                    reward = take_profit - bos_price
+                else:
+                    risk = stop_loss - bos_price
+                    reward = bos_price - take_profit
+                
+                if risk > 0:
+                    setup['risk_reward'] = abs(reward / risk)
+                else:
+                    setup['risk_reward'] = 0
+                
+                setups.append(setup)
+        
+        return setups
+    
+    def _find_ote_with_ob_setups(self, df: pd.DataFrame, ote_zones: List[Dict], order_blocks: List[Dict], daily_bias: Dict) -> List[Dict]:
+        """
+        Find OTE with Order Block setups
+        
+        Args:
+            df (pd.DataFrame): OHLCV data
+            ote_zones (list): OTE zones
+            order_blocks (list): Order blocks
+            daily_bias (dict): Daily bias information
+            
+        Returns:
+            list: OTE with Order Block setups
+        """
+        setups = []
+        
+        # Need at least one OTE zone and one order block
+        if not ote_zones or not order_blocks:
+            return setups
+        
+        # Get bias direction
+        bias_direction = daily_bias.get('direction', 'neutral')
+        
+        # Current price
+        current_price = df['close'].iloc[-1]
+        
+        for ote in ote_zones:
+            ote_type = ote.get('type')
+            
+            # Skip if OTE doesn't align with bias
+            if bias_direction != 'neutral' and ote_type != bias_direction:
+                continue
+            
+            # Check if price is near the OTE zone
+            ote_top = ote.get('top')
+            ote_bottom = ote.get('bottom')
+            
+            # Skip if price is not near the OTE zone
+            if not (ote_bottom * 0.99 <= current_price <= ote_top * 1.01):
+                continue
+            
+            # Look for an order block that aligns with the OTE
+            for ob in order_blocks:
+                ob_type = ob.get('type')
+                
+                # Skip if OB doesn't align with OTE
+                if ob_type != ote_type:
+                    continue
+                
+                # Check if the OB is in a good location relative to the OTE
+                ob_top = ob.get('top')
+                ob_bottom = ob.get('bottom')
+                
+                # For bullish setups, OB should be below OTE
+                # For bearish setups, OB should be above OTE
+                valid_location = False
+                
+                if ote_type == 'bullish' and ob_top <= ote_bottom:
+                    valid_location = True
+                elif ote_type == 'bearish' and ob_bottom >= ote_top:
+                    valid_location = True
+                
+                if valid_location:
+                    # Calculate setup strength
+                    ote_strength = ote.get('strength', 50)
+                    ob_strength = ob.get('strength', 50)
+                    
+                    # Combined strength
+                    combined_strength = (ote_strength + ob_strength) / 2
+                    
+                    # Apply setup weight
+                    final_strength = combined_strength * self.setups['ote_with_ob']
+                    
+                    # Create setup
+                    setup = {
+                        'type': 'ote_with_ob',
+                        'direction': ote_type,
+                        'ote_zone': {
+                            'top': ote_top,
+                            'bottom': ote_bottom,
+                            'middle': ote.get('middle')
+                        },
+                        'order_block': {
+                            'top': ob_top,
+                            'bottom': ob_bottom,
+                            'middle': ob.get('middle')
+                        },
+                        'strength': min(100, int(final_strength)),
+                        'description': f"{ote_type.capitalize()} OTE Zone with Order Block"
+                    }
+                    
+                    # Calculate entry, stop loss and take profit
+                    if ote_type == 'bullish':
+                        # Entry at the middle of the OTE zone
+                        entry_price = ote.get('middle')
+                        # Stop loss below the OTE zone
+                        stop_loss = ote_bottom * 0.99
+                        # Take profit based on the leg size
+                        leg_size = ote.get('leg_size', 0)
+                        take_profit = entry_price + leg_size
+                    else:
+                        # Entry at the middle of the OTE zone
+                        entry_price = ote.get('middle')
+                        # Stop loss above the OTE zone
+                        stop_loss = ote_top * 1.01
+                        # Take profit based on the leg size
+                        leg_size = ote.get('leg_size', 0)
+                        take_profit = entry_price - leg_size
+                    
+                    setup['entry_price'] = entry_price
+                    setup['stop_loss'] = stop_loss
+                    setup['take_profit'] = take_profit
+                    
+                    # Calculate risk-reward ratio
+                    if ote_type == 'bullish':
+                        risk = entry_price - stop_loss
+                        reward = take_profit - entry_price
+                    else:
+                        risk = stop_loss - entry_price
+                        reward = entry_price - take_profit
+                    
+                    if risk > 0:
+                        setup['risk_reward'] = abs(reward / risk)
+                    else:
+                        setup['risk_reward'] = 0
+                    
+                    setups.append(setup)
+        
+        return setups
+    
+    def _find_fvg_with_liquidity_setups(self, df: pd.DataFrame, fair_value_gaps: List[Dict], liquidity_levels: List[Dict]) -> List[Dict]:
+        """
+        Find Fair Value Gap with Liquidity setups
+        
+        Args:
+            df (pd.DataFrame): OHLCV data
+            fair_value_gaps (list): Fair value gaps
+            liquidity_levels (list): Liquidity levels
+            
+        Returns:
+            list: FVG with Liquidity setups
+        """
+        setups = []
+        
+        # Need at least one FVG and one liquidity level
+        if not fair_value_gaps or not liquidity_levels:
+            return setups
+        
+        # Current price
+        current_price = df['close'].iloc[-1]
+        
+        for fvg in fair_value_gaps:
+            fvg_type = fvg.get('type')
+            fvg_top = fvg.get('top')
+            fvg_bottom = fvg.get('bottom')
+            
+            # Skip if price is not near the FVG
+            if not (fvg_bottom * 0.99 <= current_price <= fvg_top * 1.01):
+                continue
+            
+            # Look for a liquidity level that aligns with the FVG
+            for liq in liquidity_levels:
+                liq_type = liq.get('type')
+                liq_price = liq.get('price')
+                
+                # For bullish FVG, we want a low liquidity level
+                # For bearish FVG, we want a high liquidity level
+                valid_combination = False
+                
+                if fvg_type == 'bullish' and liq_type == 'low' and liq_price < fvg_bottom:
+                    valid_combination = True
+                elif fvg_type == 'bearish' and liq_type == 'high' and liq_price > fvg_top:
+                    valid_combination = True
+                
+                if valid_combination:
+                    # Calculate setup strength
+                    fvg_strength = fvg.get('strength', 50)
+                    liq_strength = liq.get('strength', 50)
+                    
+                    # Combined strength
+                    combined_strength = (fvg_strength + liq_strength) / 2
+                    
+                    # Apply setup weight
+                    final_strength = combined_strength * self.setups['fvg_with_liquidity']
+                    
+                    # Create setup
+                    setup = {
+                        'type': 'fvg_with_liquidity',
+                        'direction': fvg_type,
+                        'fvg': {
+                            'top': fvg_top,
+                            'bottom': fvg_bottom,
+                            'middle': fvg.get('middle')
+                        },
+                        'liquidity': {
+                            'type': liq_type,
+                            'price': liq_price
+                        },
+                        'strength': min(100, int(final_strength)),
+                        'description': f"{fvg_type.capitalize()} FVG with {liq_type.capitalize()} Liquidity"
+                    }
+                    
+                    # Calculate entry, stop loss and take profit
+                    if fvg_type == 'bullish':
+                        # Entry at the middle of the FVG
+                        entry_price = fvg.get('middle')
+                        # Stop loss below the liquidity level
+                        stop_loss = liq_price * 0.99
+                        # Take profit based on the FVG size
+                        fvg_size = fvg_top - fvg_bottom
+                        take_profit = entry_price + fvg_size * 2
+                    else:
+                        # Entry at the middle of the FVG
+                        entry_price = fvg.get('middle')
+                        # Stop loss above the liquidity level
+                        stop_loss = liq_price * 1.01
+                        # Take profit based on the FVG size
+                        fvg_size = fvg_top - fvg_bottom
+                        take_profit = entry_price - fvg_size * 2
+                    
+                    setup['entry_price'] = entry_price
+                    setup['stop_loss'] = stop_loss
+                    setup['take_profit'] = take_profit
+                    
+                    # Calculate risk-reward ratio
+                    if fvg_type == 'bullish':
+                        risk = entry_price - stop_loss
+                        reward = take_profit - entry_price
+                    else:
+                        risk = stop_loss - entry_price
+                        reward = entry_price - take_profit
+                    
+                    if risk > 0:
+                        setup['risk_reward'] = abs(reward / risk)
+                    else:
+                        setup['risk_reward'] = 0
+                    
+                    setups.append(setup)
+        
+        return setups
+    
+    def _find_breaker_block_setups(self, df: pd.DataFrame, breaker_blocks: List[Dict], daily_bias: Dict) -> List[Dict]:
+        """
+        Find Breaker Block setups
+        
+        Args:
+            df (pd.DataFrame): OHLCV data
+            breaker_blocks (list): Breaker blocks
+            daily_bias (dict): Daily bias information
+            
+        Returns:
+            list: Breaker Block setups
+        """
+        setups = []
+        
+        # Need at least one breaker block
+        if not breaker_blocks:
+            return setups
+        
+        # Get bias direction
+        bias_direction = daily_bias.get('direction', 'neutral')
+        
+        # Current price
+        current_price = df['close'].iloc[-1]
+        
+        for bb in breaker_blocks:
+            bb_type = bb.get('type')
+            bb_top = bb.get('top')
+            bb_bottom = bb.get('bottom')
+            
+            # Skip if breaker block doesn't align with bias
+            if bias_direction != 'neutral' and bb_type != bias_direction:
+                continue
+            
+            # Check if price is near the breaker block
+            if not (bb_bottom * 0.99 <= current_price <= bb_top * 1.01):
+                continue
+            
+            # Calculate setup strength
+            base_strength = bb.get('strength', 50)
+            
+            # Apply setup weight
+            final_strength = base_strength * self.setups['breaker_block']
+            
+            # Create setup
+            setup = {
+                'type': 'breaker_block',
+                'direction': bb_type,
+                'breaker_block': {
+                    'top': bb_top,
+                    'bottom': bb_bottom,
+                    'middle': bb.get('middle')
+                },
+                'strength': min(100, int(final_strength)),
+                'description': f"{bb_type.capitalize()} Breaker Block"
+            }
+            
+            # Calculate entry, stop loss and take profit
+            if bb_type == 'bullish':
+                # Entry at the middle of the breaker block
+                entry_price = bb.get('middle')
+                # Stop loss below the breaker block
+                stop_loss = bb_bottom * 0.99
+                # Take profit based on the breaker block size
+                bb_size = bb_top - bb_bottom
+                take_profit = entry_price + bb_size * 3
+            else:
+                # Entry at the middle of the breaker block
+                entry_price = bb.get('middle')
+                # Stop loss above the breaker block
+                stop_loss = bb_top * 1.01
+                # Take profit based on the breaker block size
+                bb_size = bb_top - bb_bottom
+                take_profit = entry_price - bb_size * 3
+            
+            setup['entry_price'] = entry_price
+            setup['stop_loss'] = stop_loss
+            setup['take_profit'] = take_profit
+            
+            # Calculate risk-reward ratio
+            if bb_type == 'bullish':
+                risk = entry_price - stop_loss
+                reward = take_profit - entry_price
+            else:
+                risk = stop_loss - entry_price
+                reward = entry_price - take_profit
+            
+            if risk > 0:
+                setup['risk_reward'] = abs(reward / risk)
+            else:
+                setup['risk_reward'] = 0
+            
+            setups.append(setup)
+        
+        return setups
+    
+    def _find_inducement_to_liquidity_setups(self, df: pd.DataFrame, inducement_zones: List[Dict], liquidity_levels: List[Dict]) -> List[Dict]:
+        """
+        Find Inducement to Liquidity setups
+        
+        Args:
+            df (pd.DataFrame): OHLCV data
+            inducement_zones (list): Inducement zones
+            liquidity_levels (list): Liquidity levels
+            
+        Returns:
+            list: Inducement to Liquidity setups
+        """
+        setups = []
+        
+        # Need at least one inducement zone and one liquidity level
+        if not inducement_zones or not liquidity_levels:
+            return setups
+        
+        # Current price
+        current_price = df['close'].iloc[-1]
+        
+        for ind in inducement_zones:
+            ind_type = ind.get('type')
+            ind_price = ind.get('price')
+            
+            # Skip if price is not near the inducement zone
+            if not (ind_price * 0.99 <= current_price <= ind_price * 1.01):
+                continue
+            
+            # Look for a liquidity level that aligns with the inducement
+            for liq in liquidity_levels:
+                liq_type = liq.get('type')
+                liq_price = liq.get('price')
+                
+                # For bullish inducement, we want a high liquidity level
+                # For bearish inducement, we want a low liquidity level
+                valid_combination = False
+                
+                if ind_type == 'bullish' and liq_type == 'high' and liq_price > ind_price:
+                    valid_combination = True
+                elif ind_type == 'bearish' and liq_type == 'low' and liq_price < ind_price:
+                    valid_combination = True
+                
+                if valid_combination:
+                    # Calculate setup strength
+                    ind_strength = ind.get('strength', 50)
+                    liq_strength = liq.get('strength', 50)
+                    
+                    # Combined strength
+                    combined_strength = (ind_strength + liq_strength) / 2
+                    
+                    # Apply setup weight
+                    final_strength = combined_strength * self.setups['inducement_to_liquidity']
+                    
+                    # Create setup
+                    setup = {
+                        'type': 'inducement_to_liquidity',
+                        'direction': ind_type,
+                        'inducement': {
+                            'price': ind_price
+                        },
+                        'liquidity': {
+                            'type': liq_type,
+                            'price': liq_price
+                        },
+                        'strength': min(100, int(final_strength)),
+                        'description': f"{ind_type.capitalize()} Inducement to {liq_type.capitalize()} Liquidity"
+                    }
+                    
+                    # Calculate entry, stop loss and take profit
+                    if ind_type == 'bullish':
+                        # Entry at the inducement price
+                        entry_price = ind_price
+                        # Stop loss below the inducement
+                        stop_loss = entry_price * 0.99
+                        # Take profit at the liquidity level
+                        take_profit = liq_price
+                    else:
+                        # Entry at the inducement price
+                        entry_price = ind_price
+                        # Stop loss above the inducement
+                        stop_loss = entry_price * 1.01
+                        # Take profit at the liquidity level
+                        take_profit = liq_price
+                    
+                    setup['entry_price'] = entry_price
+                    setup['stop_loss'] = stop_loss
+                    setup['take_profit'] = take_profit
+                    
+                    # Calculate risk-reward ratio
+                    if ind_type == 'bullish':
+                        risk = entry_price - stop_loss
+                        reward = take_profit - entry_price
+                    else:
+                        risk = stop_loss - entry_price
+                        reward = entry_price - take_profit
+                    
+                    if risk > 0:
+                        setup['risk_reward'] = abs(reward / risk)
+                    else:
+                        setup['risk_reward'] = 0
+                    
+                    setups.append(setup)
+        
+        return setups
+    
+    def _find_choch_flip_setups(self, df: pd.DataFrame, choch_zones: List[Dict], market_structure: Dict) -> List[Dict]:
+        """
+        Find Change of Character (CHOCH) Flip setups
+        
+        Args:
+            df (pd.DataFrame): OHLCV data
+            choch_zones (list): Change of character zones
+            market_structure (dict): Market structure analysis
+            
+        Returns:
+            list: CHOCH Flip setups
+        """
+        setups = []
+        
+        # Need at least one CHOCH zone
+        if not choch_zones:
+            return setups
+        
+        # Get trend from market structure
+        trend = market_structure.get('trend', 'neutral')
+        
+        # Current price
+        current_price = df['close'].iloc[-1]
+        
+        for choch in choch_zones:
+            choch_type = choch.get('type')
+            choch_price = choch.get('price')
+            
+            # Skip if CHOCH doesn't align with trend
+            if trend != 'neutral' and choch_type != trend:
+                continue
+            
+            # Check if price is near the CHOCH zone
+            if not (choch_price * 0.99 <= current_price <= choch_price * 1.01):
+                continue
+            
+            # Calculate setup strength
+            base_strength = choch.get('strength', 50)
+            
+            # Apply setup weight
+            final_strength = base_strength * self.setups['choch_flip']
+            
+            # Create setup
+            setup = {
+                'type': 'choch_flip',
+                'direction': choch_type,
+                'choch': {
+                    'price': choch_price
+                },
+                'strength': min(100, int(final_strength)),
+                'description': f"{choch_type.capitalize()} Change of Character Flip"
+            }
+            
+            # Calculate entry, stop loss and take profit
+            if choch_type == 'bullish':
+                # Entry at the CHOCH price
+                entry_price = choch_price
+                # Stop loss below the CHOCH
+                stop_loss = entry_price * 0.99
+                # Take profit based on recent swing high
+                recent_high = df['high'].iloc[-20:].max()
+                take_profit = entry_price + (recent_high - entry_price) * 1.5
+            else:
+                # Entry at the CHOCH price
+                entry_price = choch_price
+                # Stop loss above the CHOCH
+                stop_loss = entry_price * 1.01
+                # Take profit based on recent swing low
+                recent_low = df['low'].iloc[-20:].min()
+                take_profit = entry_price - (entry_price - recent_low) * 1.5
+            
+            setup['entry_price'] = entry_price
+            setup['stop_loss'] = stop_loss
+            setup['take_profit'] = take_profit
+            
+            # Calculate risk-reward ratio
+            if choch_type == 'bullish':
+                risk = entry_price - stop_loss
+                reward = take_profit - entry_price
+            else:
+                risk = stop_loss - entry_price
+                reward = entry_price - take_profit
+            
+            if risk > 0:
+                setup['risk_reward'] = abs(reward / risk)
+            else:
+                setup['risk_reward'] = 0
+            
+            setups.append(setup)
+        
+        return setups
+    
+    def _find_kill_zone_setups(self, df: pd.DataFrame, kill_zones: Dict, daily_bias: Dict) -> List[Dict]:
+        """
+        Find Kill Zone Entry setups
+        
+        Args:
+            df (pd.DataFrame): OHLCV data
+            kill_zones (dict): Session kill zones
+            daily_bias (dict): Daily bias information
+            
+        Returns:
+            list: Kill Zone Entry setups
+        """
+        setups = []
+        
+        # Need at least one kill zone
+        if not kill_zones:
+            return setups
+        
+        # Get bias direction
+        bias_direction = daily_bias.get('direction', 'neutral')
+        
+        # Skip if no clear bias
+        if bias_direction == 'neutral':
+            return setups
+        
+        # Check if we're in a kill zone now
+        # This would require datetime index and current time analysis
+        # For simplicity, we'll just check if any kill zone has a strong bias
+        
+        for session_name, session_data in kill_zones.items():
+            session_bias = session_data.get('bias')
+            bias_strength = session_data.get('bias_strength', 0)
+            
+            # Skip if session bias doesn't align with daily bias
+            if session_bias != bias_direction:
+                continue
+            
+            # Skip if bias strength is too low
+            if bias_strength < 60:
+                continue
+            
+            # Calculate setup strength
+            base_strength = bias_strength
+            
+            # Adjust based on session preference
+            session_weight = self.session_preferences.get(session_name, 0.7)
+            
+            # Apply setup weight
+            final_strength = base_strength * self.setups['kill_zone_entry'] * session_weight
+            
+            # Create setup
+            setup = {
+                'type': 'kill_zone_entry',
+                'direction': bias_direction,
+                'session': session_name,
+                'strength': min(100, int(final_strength)),
+                'description': f"{bias_direction.capitalize()} {session_name.capitalize()} Kill Zone Entry"
+            }
+            
+            # Calculate entry, stop loss and take profit
+            current_price = df['close'].iloc[-1]
+            
+            if bias_direction == 'bullish':
+                # Entry at current price
+                entry_price = current_price
+                # Stop loss based on session average range
+                avg_range = session_data.get('avg_range', 0)
+                stop_loss = entry_price - avg_range * 0.5
+                # Take profit based on session average range
+                take_profit = entry_price + avg_range * 1.5
+            else:
+                # Entry at current price
+                entry_price = current_price
+                # Stop loss based on session average range
+                avg_range = session_data.get('avg_range', 0)
+                stop_loss = entry_price + avg_range * 0.5
+                # Take profit based on session average range
+                take_profit = entry_price - avg_range * 1.5
+            
+            setup['entry_price'] = entry_price
+            setup['stop_loss'] = stop_loss
+            setup['take_profit'] = take_profit
+            
+            # Calculate risk-reward ratio
+            if bias_direction == 'bullish':
+                risk = entry_price - stop_loss
+                reward = take_profit - entry_price
+            else:
+                risk = stop_loss - entry_price
+                reward = entry_price - take_profit
+            
+            if risk > 0:
+                setup['risk_reward'] = abs(reward / risk)
+            else:
+                setup['risk_reward'] = 0
+            
+            setups.append(setup)
+        
+        return setups
+    
+    def _setup_to_signal(self, setup: Dict, df: pd.DataFrame, symbol: str, timeframe: str) -> Dict:
+        """
+        Convert a setup to a trading signal
+        
+        Args:
+            setup (dict): Trading setup
+            df (pd.DataFrame): OHLCV data
+            symbol (str): Symbol being analyzed
+            timeframe (str): Timeframe being analyzed
+            
+        Returns:
+            dict: Trading signal
+        """
+        # Extract common setup properties
+        setup_type = setup.get('type')
+        direction = setup.get('direction')
+        entry_price = setup.get('entry_price')
+        stop_loss = setup.get('stop_loss')
+        take_profit = setup.get('take_profit')
+        risk_reward = setup.get('risk_reward', 0)
+        strength = setup.get('strength', 0)
+        description = setup.get('description', '')
+        
+        # Skip invalid setups
+        if not entry_price or not stop_loss or not take_profit:
+            return None
+        
+        # Skip setups with poor risk-reward
+        if risk_reward < 1.5:
+            return None
+        
+        # Create signal
+        signal = {
+            'symbol': symbol,
+            'timeframe': timeframe,
+            'strategy': 'ICT',
+            'setup': setup_type,
+            'direction': direction,
+            'entry_price': entry_price,
+            'stop_loss': stop_loss,
+            'take_profit': take_profit,
+            'risk_reward': risk_reward,
+            'strength': strength,
+            'timestamp': pd.Timestamp.now(),
+            'reason': description
+        }
+        
+        # Add current price
+        signal['price'] = df['close'].iloc[-1]
+        
+        return signal
+    
+    def generate_trade_setups_with_htf(self, symbol: str, timeframes: List[str]) -> List[Dict]:
+        """
+        Generate trade setups with higher timeframe context
+        
+        Args:
+            symbol (str): Symbol to analyze
+            timeframes (list): List of timeframes from highest to lowest
+            
+        Returns:
+            list: Trade setups with HTF context
+        """
+        from trading_bot.data.data_processor import DataProcessor
+        
+        # Initialize data processor
+        data_processor = DataProcessor()
+        
+        # Get data for each timeframe
+        dfs = {}
+        for tf in timeframes:
+            # Create a new event loop for this request
+            import asyncio
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            
+            try:
+                # Run the async method in the new loop
+                df = loop.run_until_complete(data_processor.get_data(symbol, tf))
+                if df is not None and not df.empty:
+                    dfs[tf] = df
+            except Exception as e:
+                logger.error(f"Error getting data for {symbol} on {tf}: {e}")
+            finally:
+                # Close the loop
+                loop.close()
+        
+        # Check if we have data for all timeframes
+        if len(dfs) != len(timeframes):
+            logger.warning(f"Could not get data for all timeframes for {symbol}")
+            return []
+        
+        # Analyze each timeframe
+        analyses = {}
+        for tf, df in dfs.items():
+            analyses[tf] = self.analyze(df, symbol, tf)
+        
+        # Determine HTF bias
+        htf_bias = self._determine_htf_bias(analyses, timeframes)
+        
+        # Generate setups for the lowest timeframe
+        ltf = timeframes[-1]
+        ltf_setups = []
+        
+        for setup in analyses[ltf].get('setups', []):
+            # Skip setups that don't align with HTF bias
+            if htf_bias['direction'] != 'neutral' and setup.get('direction') != htf_bias['direction']:
+                continue
+            
+            # Add HTF context to the setup
+            setup['htf_bias'] = htf_bias['direction']
+            setup['htf_strength'] = htf_bias['strength']
+            setup['aligned_with_htf'] = True
+            
+            # Adjust setup strength based on HTF alignment
+            setup['strength'] = min(100, int(setup.get('strength', 50) * 1.2))
+            
+            ltf_setups.append(setup)
+        
+        # Sort setups by strength (descending)
+        ltf_setups.sort(key=lambda x: x.get('strength', 0), reverse=True)
+        
+        return ltf_setups
+    
+    def _determine_htf_bias(self, analyses: Dict[str, Dict], timeframes: List[str]) -> Dict:
+        """
+        Determine higher timeframe bias
+        
+        Args:
+            analyses (dict): Analysis results for each timeframe
+            timeframes (list): List of timeframes from highest to lowest
+            
+        Returns:
+            dict: HTF bias information
+        """
+        # Start with neutral bias
+        bias = {
+            'direction': 'neutral',
+            'strength': 50,
+            'timeframe': None
+        }
+        
+        # Check each timeframe from highest to lowest
+        for tf in timeframes[:-1]:  # Skip the lowest timeframe
+            tf_bias = analyses[tf].get('bias', {})
+            tf_direction = tf_bias.get('direction', 'neutral')
+            tf_strength = tf_bias.get('strength', 0)
+            
+            # Skip neutral bias
+            if tf_direction == 'neutral':
+                continue
+            
+            # If this is the first non-neutral bias, use it
+            if bias['direction'] == 'neutral':
+                bias['direction'] = tf_direction
+                bias['strength'] = tf_strength
+                bias['timeframe'] = tf
+                continue
+            
+            # If this bias agrees with the current bias, increase strength
+            if tf_direction == bias['direction']:
+                bias['strength'] = min(100, bias['strength'] + 10)
+            # If this bias disagrees with the current bias, decrease strength
+            else:
+                bias['strength'] = max(0, bias['strength'] - 20)
+                
+                # If strength is very low, switch to this timeframe's bias
+                if bias['strength'] < 30:
+                    bias['direction'] = tf_direction
+                    bias['strength'] = tf_strength
+                    bias['timeframe'] = tf
+        
+        return bias
+
